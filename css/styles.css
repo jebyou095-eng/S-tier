@@ -9,6 +9,10 @@
   --accent-text: #ffffff;
   --danger: #b4372a;
   --ok: #2f7d6d;
+  --warn: #b36b00;
+  --protein: #b5523b;
+  --carbs: #c08a1e;
+  --fat: #3b6fb6;
   --radius: 16px;
   --tabs-h: 64px;
   color-scheme: light dark;
@@ -26,6 +30,10 @@
     --accent-text: #0d1f1b;
     --danger: #ef7f70;
     --ok: #6fc7b2;
+    --warn: #f0a640;
+    --protein: #e07a62;
+    --carbs: #e0b04a;
+    --fat: #7aa5e6;
   }
 }
 
@@ -212,7 +220,7 @@ section > select { margin-bottom: 12px; }
 /* Bottom tabs */
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   background: color-mix(in srgb, var(--card) 92%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -269,4 +277,77 @@ dialog.sheet::backdrop { background: rgb(0 0 0 / 0.45); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+/* ---------- Food ---------- */
+.warn { color: var(--warn); }
+.block { display: block; }
+.big { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.seg3 { grid-template-columns: repeat(3, 1fr); }
+.seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.grid2 .field { margin: 6px 0; }
+.callout { border-color: var(--accent); }
+
+.summary .kcal-row { display: flex; justify-content: space-between; align-items: end; margin-bottom: 8px; }
+.summary .right { text-align: right; }
+.progress.kcal { height: 12px; border-radius: 6px; margin-bottom: 14px; }
+.progress.kcal > div { background: var(--accent); }
+.mbar { margin: 8px 0; font-size: 0.9rem; }
+.mbar .row { margin-bottom: 4px; }
+.mbar span:last-child { font-variant-numeric: tabular-nums; }
+.m-p { --c: var(--protein); }
+.m-c { --c: var(--carbs); }
+.m-f { --c: var(--fat); }
+.stat.m-p .stat-v, .macros .m-p { color: var(--protein); }
+.stat.m-c .stat-v, .macros .m-c { color: var(--carbs); }
+.stat.m-f .stat-v, .macros .m-f { color: var(--fat); }
+.stats.four { grid-template-columns: repeat(4, 1fr); }
+
+.scan-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 12px; }
+.big-btn { min-height: 56px; font-size: 1rem; }
+
+.meal .tracker-head { margin-bottom: 4px; }
+.meal .tracker-head h2 { flex: none; }
+.meal .tracker-head .muted { flex: 1; text-align: right; }
+.icon-btn.add { color: var(--accent); font-size: 1.4rem; font-weight: 600; }
+.entries { list-style: none; padding: 0; margin: 4px 0 0; }
+.entries li { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding: 2px 0; }
+.entries li:first-child { border-top: 0; }
+.plan-meal .entries li { padding: 6px 0; }
+.entry { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; background: none; border: 0; padding: 4px 0; text-align: left; cursor: pointer; }
+.entry .grow { white-space: normal; }
+.plan-meal { border-top: 1px solid var(--line); padding-top: 4px; margin-top: 8px; }
+.plan-meal h3 { margin: 8px 0 2px; }
+
+.results { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 6px; }
+.results .label { padding: 4px 2px 0; }
+.result { width: 100%; text-align: left; display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; }
+.r-name { font-weight: 600; }
+.r-meta { font-size: 0.8rem; color: var(--muted); }
+.src { display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--soft); color: var(--text); vertical-align: 1px; }
+.src-usda { background: color-mix(in srgb, var(--fat) 22%, transparent); }
+.src-off { background: color-mix(in srgb, var(--carbs) 25%, transparent); }
+.src-you { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.search { min-height: 60dvh; }
+.preview { background: var(--soft); border-radius: 12px; padding: 12px; margin-top: 4px; }
+.macros { display: flex; gap: 14px; font-weight: 700; font-size: 0.9rem; margin-top: 2px; }
+
+.switch-row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.switch-row input { width: 48px; height: 28px; min-height: 0; flex: none; accent-color: var(--accent); }
+
+/* Scanner */
+dialog.scanner { border: 0; padding: 0; margin: 0; width: 100%; height: 100%; max-width: none; max-height: none; background: #000; color: #fff; }
+dialog.scanner::backdrop { background: #000; }
+.scan-view { position: absolute; inset: 0; }
+.scan-video { width: 100%; height: 100%; object-fit: cover; }
+.scan-guide { position: absolute; left: 10%; right: 10%; top: 32%; height: 22%; border: 3px solid rgb(255 255 255 / 0.9); border-radius: 16px; box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.45); }
+.scan-line { position: absolute; left: 6%; right: 6%; top: 50%; height: 2px; background: #ff4d4d; box-shadow: 0 0 8px #ff4d4d; }
+.scan-panel { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, rgb(0 0 0 / 0.85) 25%); display: grid; gap: 10px; }
+.scan-panel .btn.ghost { color: #fff; border-color: rgb(255 255 255 / 0.4); flex: 1; }
+.scan-panel input { background: rgb(255 255 255 / 0.12); border-color: rgb(255 255 255 / 0.3); color: #fff; flex: 1; }
+.scan-status { text-align: center; font-weight: 600; margin: 0 0 4px; }
+@media (prefers-reduced-motion: no-preference) {
+  .scan-line { animation: scan 1.6s ease-in-out infinite alternate; }
+  @keyframes scan { from { top: 15%; } to { top: 85%; } }
 }

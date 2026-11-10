@@ -3,25 +3,12 @@ import {
   dayKey, parseDay, addDays, dayRange, entriesByDay, dailyValue, series, summarize, streaks, byWeekday, correlations,
 } from './stats.js';
 import { barChart, heatmap, weekdayChart } from './charts.js';
+import { h, uid, dayLabel, toast, modal, confirmDialog } from './ui.js';
+import { viewFood, freshFood, normalizeFood, foodSettingsCard, resetFoodView } from './food.js';
 
-// ---------- tiny DOM helper (never uses innerHTML, so imported data can't inject markup) ----------
-function h(tag, attrs = {}, ...kids) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (v === undefined || v === null || v === false) continue;
-    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'class') el.className = v;
-    else if (k === 'value') el.value = v;
-    else if (k === 'css') for (const [p, val] of Object.entries(v)) el.style.setProperty(p, val);
-    else el.setAttribute(k, v === true ? '' : v);
-  }
-  for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) el.append(k);
-  return el;
-}
 
 const $app = document.getElementById('app');
 const $tabs = document.getElementById('tabs');
-const $toast = document.getElementById('toast');
 
 const COLORS = ['#2f7d6d', '#3b6fb6', '#b5523b', '#8a5bb0', '#c08a1e', '#c2477a', '#4f8a2e', '#5f6b7a'];
 const TYPES = { number: 'Number', rating: 'Rating 1–5', check: 'Yes / No' };
@@ -35,7 +22,6 @@ const STARTERS = [
 
 const num = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const num1 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-const uid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
 
 let state = null;
 let view = 'today';
@@ -47,7 +33,7 @@ let hiddenAt = 0;
 
 // ---------- state ----------
 function freshState() {
-  return { v: 1, trackers: [], entries: [], settings: { autoLock: 1 } };
+  return { v: 1, trackers: [], entries: [], settings: { autoLock: 1 }, food: freshFood() };
 }
 
 /** Validate anything that comes from disk or a backup file. */
@@ -76,6 +62,7 @@ function normalize(raw) {
   }
   const al = raw.settings?.autoLock;
   out.settings.autoLock = [0, 1, 5, 15, -1].includes(al) ? al : 1;
+  out.food = normalizeFood(raw.food);
   return out;
 }
 
@@ -98,41 +85,7 @@ function formatValue(t, v) {
   return t.unit ? `${num.format(v)} ${t.unit}` : num.format(v);
 }
 
-function dayLabel(k) {
-  const today = dayKey();
-  if (k === today) return 'Today';
-  if (k === addDays(today, -1)) return 'Yesterday';
-  return parseDay(k).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-}
 
-function toast(msg) {
-  $toast.textContent = msg;
-  $toast.hidden = false;
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => { $toast.hidden = true; }, 2600);
-}
-
-// ---------- dialogs ----------
-function modal(build) {
-  return new Promise((resolve) => {
-    const dlg = h('dialog', { class: 'sheet' });
-    const done = (val) => { dlg.close(); dlg.remove(); resolve(val); };
-    dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
-    dlg.append(build(done));
-    document.body.append(dlg);
-    dlg.showModal();
-    dlg.querySelector('[autofocus]')?.focus();
-  });
-}
-
-function confirmDialog(title, body, okLabel = 'OK', danger = false) {
-  return modal((done) => h('div', { class: 'sheet-body' },
-    h('h2', {}, title),
-    body ? h('p', { class: 'muted' }, body) : null,
-    h('div', { class: 'row end' },
-      h('button', { class: 'btn ghost', onclick: () => done(false) }, 'Cancel'),
-      h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => done(true) }, okLabel))));
-}
 
 function passcodeDialog(title, { confirm = false, hint } = {}) {
   return modal((done) => {
@@ -622,9 +575,11 @@ function viewSettings() {
         locked ? h('button', { class: 'btn ghost', onclick: removePasscode }, 'Remove') : null,
         locked ? h('button', { class: 'btn ghost', onclick: lockNow }, 'Lock now') : null)),
 
+    foodSettingsCard(foodCtx),
+
     h('article', { class: 'card' },
       h('h2', {}, 'Your data'),
-      h('p', { class: 'muted small' }, `${state.trackers.length} trackers · ${state.entries.length} entries · stored only on this phone`),
+      h('p', { class: 'muted small' }, `${state.trackers.length} trackers · ${state.entries.length} entries · ${state.food.log.length} foods logged · stored only on this phone`),
       h('p', {}, persist),
       h('div', { class: 'stack' },
         h('button', { class: 'btn ghost', onclick: exportBackup }, locked ? 'Export encrypted backup' : 'Export backup'),
@@ -636,11 +591,19 @@ function viewSettings() {
       h('h2', {}, 'Privacy'),
       h('ul', { class: 'bullets' },
         h('li', {}, 'No accounts, no cloud, no servers. Data never leaves this phone unless you export it.'),
-        h('li', {}, 'The app is blocked from making any network requests, and contains no ads, trackers, fonts or third-party code.'),
+        h('li', {}, 'The app can only talk to the two food databases, and only after you allow it. Everything else is blocked. No ads, trackers or analytics.'),
+        h('li', {}, 'Barcode scanning happens on the phone. Camera images are never saved or sent.'),
         h('li', {}, 'Works fully offline once opened.'),
         h('li', {}, 'With a passcode, data is encrypted at rest and hidden in the app switcher.'))),
     h('p', { class: 'muted small center' }, 'Pocket Stats v1.0'));
 }
+
+// Context handed to the Food tab so it can read and save shared state.
+const foodCtx = {
+  get state() { return state; },
+  commit: () => commit(),
+  render: () => render(),
+};
 
 // ---------- lock screen ----------
 function lockNow() {
@@ -692,6 +655,7 @@ function showLock() {
 // ---------- shell ----------
 const TABS = [
   ['today', 'Today', 'M4 6h16M4 12h16M4 18h10'],
+  ['food', 'Food', 'M6 3v7a2 2 0 0 0 4 0V3M8 3v18M17 21V3c-2.2 0-4 2.7-4 7v3h4'],
   ['insights', 'Insights', 'M5 20V11M12 20V4M19 20v-6'],
   ['history', 'History', 'M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z'],
   ['settings', 'Settings', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'],
@@ -711,12 +675,12 @@ function render() {
   if (!state) return;
   const scroll = view === render.lastView ? window.scrollY : 0;
   render.lastView = view;
-  const views = { today: viewToday, insights: viewInsights, history: viewHistory, settings: viewSettings };
+  const views = { today: viewToday, food: () => viewFood(foodCtx), insights: viewInsights, history: viewHistory, settings: viewSettings };
   $app.replaceChildren(views[view]());
   $tabs.hidden = false;
   $tabs.replaceChildren(...TABS.map(([id, label, d]) => h('button', {
     class: `tab${id === view ? ' on' : ''}`, 'aria-current': id === view ? 'page' : null,
-    onclick: () => { view = id; if (id === 'today') curDay = dayKey(); render(); },
+    onclick: () => { if (id !== view) { if (id === 'today') curDay = dayKey(); if (id === 'food') resetFoodView(); } view = id; render(); },
   }, icon(d), h('span', {}, label))));
   window.scrollTo(0, scroll);
 }
