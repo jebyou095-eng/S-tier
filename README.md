@@ -17,6 +17,8 @@ It also has a **gym section** (exercise library with muscle maps, animated form 
 
 ## Put it on your phone
 
+**Android app: `dist/PocketStats.apk`.** Download it on your phone, open it, and allow "install unknown apps" for your browser or Files app when Android asks. Data stays in the app's private storage, is excluded from Google cloud backup, and the screen is hidden from screenshots and the app switcher while a passcode is set. Build it yourself with `PS_KS_PASS=… ./android/build.sh` (no Gradle or Android Studio needed; see the script header). Keep your signing key private and out of this public repo.
+
 **Quickest: download one file.** `dist/PocketStats.html` is the whole app in a single file (about 550 KB) with every feature. Save it on your phone and open it in your browser (Android: Chrome or Firefox). Rebuild it with `python3 tools/build.py`.
 
 **Or host it** (best for installing to the home screen with offline mode):
@@ -84,3 +86,4 @@ python3 -m http.server 8000
 | `js/ui.js` | Shared UI helpers |
 | `sw.js` | Offline cache (app files only) |
 | `tools/build.py` | Bundles everything into the single-file `dist/` builds |
+| `android/` | Android app: WebView host (`MainActivity.java`), manifest, icons, `build.sh` |

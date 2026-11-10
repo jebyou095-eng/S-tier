@@ -441,6 +441,11 @@ function viewHistory() {
 }
 
 async function download(name, text, type) {
+  // Android app: hand the file to the system "Save to…" picker.
+  if (globalThis.PocketStatsAndroid?.save) {
+    globalThis.PocketStatsAndroid.save(name, type, text);
+    return;
+  }
   // Inside the claude.ai web-link version, files go through the viewer's save prompt.
   const saver = globalThis.claude?.use ? await globalThis.claude.use('downloads').catch(() => null) : null;
   if (saver) {
@@ -642,6 +647,7 @@ function lockNow() {
 }
 
 function showLock() {
+  try { globalThis.PocketStatsAndroid?.setSecure?.(true); } catch { /* not in the Android app */ }
   $tabs.hidden = true;
   document.body.classList.remove('hide-content');
   const input = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Passcode', 'aria-label': 'Passcode', autofocus: true });
@@ -701,6 +707,8 @@ function icon(d) {
 }
 
 function render() {
+  // Android app: block screenshots and the app-switcher preview while a passcode is set.
+  try { globalThis.PocketStatsAndroid?.setSecure?.(vault.hasPasscode()); } catch { /* not in the Android app */ }
   if (!state) return;
   const scroll = view === render.lastView ? window.scrollY : 0;
   render.lastView = view;
@@ -728,7 +736,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function boot() {
-  if ('serviceWorker' in navigator && location.protocol === 'https:' && !globalThis.POCKET_STATS_HOSTED) {
+  if ('serviceWorker' in navigator && location.protocol === 'https:' && !globalThis.POCKET_STATS_HOSTED && !globalThis.POCKET_STATS_BUNDLED) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   vault.requestPersistence();

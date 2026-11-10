@@ -1,0 +1,6 @@
+# Android build output and signing keys (never commit keys: this repo is public)
+android/build/
+android/app/assets/
+*.jks
+*.keystore
+*.idsig

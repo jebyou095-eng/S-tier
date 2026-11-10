@@ -4,6 +4,7 @@
   dist/PocketStats.html      Full offline app you can download and keep.
                              Strict CSP: inline code is allowed only by exact
                              SHA-256 hash; network only to the two food databases.
+  android/app/assets/index.html  Same as PocketStats.html, packaged into the Android APK.
   dist/pocket-stats-web.html Page body for the claude.ai web-link version
                              (hosted flag on: no service worker, no online lookups).
 
@@ -55,7 +56,7 @@ def convert(name, src):
 def bundle(hosted):
     order = []
     load(ENTRY.removesuffix('.js'), set(), order)
-    code = '"use strict";\n'
+    code = '"use strict";\nglobalThis.POCKET_STATS_BUNDLED = true;\n'
     if hosted:
         code += 'globalThis.POCKET_STATS_HOSTED = true;\n'
     code += ''.join(convert(n, s) for n, s in order)
@@ -122,6 +123,9 @@ def main():
 </html>
 '''
     (out / 'PocketStats.html').write_text(full)
+    assets = ROOT / 'android' / 'app' / 'assets'
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / 'index.html').write_text(full)
 
     # 2) claude.ai web-link version (the host supplies the document skeleton and CSP)
     web = f'''<title>Pocket Stats</title>
