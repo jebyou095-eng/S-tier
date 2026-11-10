@@ -96,6 +96,10 @@ function defaultMeal() {
 
 // ---------- privacy consent ----------
 async function ensureOnline() {
+  if (globalThis.POCKET_STATS_HOSTED) {
+    toast('Online lookups only work in the downloaded app. Built-in foods and label entry work here.');
+    return false;
+  }
   if (F().online) return true;
   const ok = await modal((done) => h('div', { class: 'sheet-body' },
     h('h2', {}, 'Look up foods online?'),
@@ -290,7 +294,7 @@ async function scanFlow() {
   const known = F().saved.find((s) => s.code && (s.code === code || s.code === raw));
   if (known) return pickAndLog(known);
   if (!await ensureOnline()) {
-    toast('Not in your saved foods. Enter it from the label instead.');
+    toast(globalThis.POCKET_STATS_HOSTED ? `Barcode ${code} read. Enter its label once; next time this scan finds it instantly.` : 'Not in your saved foods. Enter it from the label instead.');
     return pickAndLog(await labelDialog({ code }));
   }
   toast('Looking up…');
@@ -616,10 +620,11 @@ export function foodSettingsCard(c) {
   const key = h('input', { value: F().usdaKey, placeholder: 'Optional: your free USDA API key', maxlength: 64, autocomplete: 'off', 'aria-label': 'USDA API key' });
   return h('article', { class: 'card' },
     h('h2', {}, 'Food lookups'),
-    h('label', { class: 'switch-row' },
+    globalThis.POCKET_STATS_HOSTED ? h('p', { class: 'muted small' }, 'Online lookups are switched off in the web-link version. Built-in foods (including Moroccan dishes), saved foods and label entry all work. Use the downloaded app for USDA and Open Food Facts lookups.') : null,
+    globalThis.POCKET_STATS_HOSTED ? null : h('label', { class: 'switch-row' },
       h('span', { class: 'grow' }, 'Look up foods online', h('span', { class: 'muted small block' }, 'Sends only a barcode or search words to USDA and Open Food Facts. Off = built-in and saved foods only.')),
       h('input', { type: 'checkbox', role: 'switch', checked: F().online, onchange: async (e) => { F().online = e.target.checked; await ctx.commit(); } })),
-    h('label', { class: 'field' }, h('span', {}, 'USDA API key'), key),
+    ...(globalThis.POCKET_STATS_HOSTED ? [] : [h('label', { class: 'field' }, h('span', {}, 'USDA API key'), key),
     h('p', { class: 'muted small' }, 'Without a key, USDA allows a limited number of searches per hour. A free key from api.data.gov raises that limit.'),
     h('button', {
       class: 'btn ghost', onclick: async () => {
@@ -627,7 +632,7 @@ export function foodSettingsCard(c) {
         if (!/^[A-Za-z0-9]{0,64}$/.test(v)) { toast("That key doesn't look right."); return; }
         F().usdaKey = v; await ctx.commit(); toast('Saved');
       },
-    }, 'Save key'),
+    }, 'Save key')]),
     h('p', { class: 'muted small' }, `${F().saved.length} saved foods · ${F().log.length} diary entries`),
     F().saved.length ? h('button', {
       class: 'btn ghost', onclick: async () => {

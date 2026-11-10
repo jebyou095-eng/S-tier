@@ -19,6 +19,7 @@ async function nativeDetector() {
 }
 
 function loadZxing() {
+  if (globalThis.ZXing) return Promise.resolve(globalThis.ZXing); // bundled builds include it inline
   zxingLoad ??= new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = 'js/vendor/zxing.min.js';
@@ -179,6 +180,10 @@ export function scanBarcode() {
         det = await getDetector();
       } catch {
         status.textContent = 'Scanner unavailable. Take a photo or type the number.';
+        return;
+      }
+      if (globalThis.POCKET_STATS_HOSTED) {
+        status.textContent = 'Tap "Take photo" and photograph the barcode, or type its number.';
         return;
       }
       if (!navigator.mediaDevices?.getUserMedia) {

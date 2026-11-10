@@ -17,6 +17,10 @@ It also has a **gym section** (exercise library with muscle maps, animated form 
 
 ## Put it on your phone
 
+**Quickest: download one file.** `dist/PocketStats.html` is the whole app in a single file (about 550 KB) with every feature. Save it on your phone and open it in your browser (Android: Chrome or Firefox). Rebuild it with `python3 tools/build.py`.
+
+**Or host it** (best for installing to the home screen with offline mode):
+
 The app is a set of static files. It has to be served over **https** (needed for encryption and offline mode). The easiest way is GitHub Pages:
 
 1. In this repo on GitHub: **Settings → Pages → Build and deployment → Deploy from a branch**, then pick your branch and `/ (root)`.
@@ -79,3 +83,4 @@ python3 -m http.server 8000
 | `js/poses.js` | Animated exercise demonstrations |
 | `js/ui.js` | Shared UI helpers |
 | `sw.js` | Offline cache (app files only) |
+| `tools/build.py` | Bundles everything into the single-file `dist/` builds |

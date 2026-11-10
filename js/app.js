@@ -440,7 +440,18 @@ function viewHistory() {
     list.length > historyLimit ? h('button', { class: 'btn ghost wide', onclick: () => { historyLimit += 200; render(); } }, 'Show more') : null);
 }
 
-function download(name, text, type) {
+async function download(name, text, type) {
+  // Inside the claude.ai web-link version, files go through the viewer's save prompt.
+  const saver = globalThis.claude?.use ? await globalThis.claude.use('downloads').catch(() => null) : null;
+  if (saver) {
+    try {
+      await saver.save({ filename: name, data: text });
+      toast('Saved');
+    } catch (err) {
+      if (err?.code !== 'declined') toast("Couldn't save the file here.");
+    }
+    return;
+  }
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = h('a', { href: url, download: name });
   document.body.append(a);
@@ -597,6 +608,7 @@ function viewSettings() {
       h('h2', {}, 'Your data'),
       h('p', { class: 'muted small' }, `${state.trackers.length} trackers · ${state.entries.length} entries · ${state.food.log.length} foods logged · stored only on this phone`),
       h('p', {}, persist),
+      globalThis.POCKET_STATS_HOSTED ? h('p', { class: 'warn small' }, 'You are using the web-link version. Your browser can clear its storage, so export a backup every week. You can restore it in any version of Pocket Stats.') : null,
       h('div', { class: 'stack' },
         h('button', { class: 'btn ghost', onclick: exportBackup }, locked ? 'Export encrypted backup' : 'Export backup'),
         h('button', { class: 'btn ghost', onclick: importBackup }, 'Restore from backup'),
@@ -716,7 +728,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function boot() {
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  if ('serviceWorker' in navigator && location.protocol === 'https:' && !globalThis.POCKET_STATS_HOSTED) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   vault.requestPersistence();
