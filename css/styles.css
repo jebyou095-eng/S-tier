@@ -351,3 +351,104 @@ dialog.scanner::backdrop { background: #000; }
   .scan-line { animation: scan 1.6s ease-in-out infinite alternate; }
   @keyframes scan { from { top: 15%; } to { top: 85%; } }
 }
+
+/* ---------- Gym ---------- */
+.src-est { background: color-mix(in srgb, var(--protein) 20%, transparent); }
+.link.back { margin: 4px 0 -4px; padding-left: 0; }
+.tags .tag { font-size: 0.78rem; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--soft); }
+.chev { color: var(--muted); font-size: 1.2rem; }
+.ex-row strong { font-weight: 600; }
+
+.body-maps { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-width: 420px; margin: 0 auto; }
+.body-map { width: 100%; height: auto; }
+.body-map .silhouette > * { fill: var(--soft); stroke: var(--line); stroke-width: 1; }
+.body-map .muscle path { fill: color-mix(in srgb, var(--muted) 22%, var(--card)); stroke: var(--card); stroke-width: 0.8; transition: fill 0.2s; }
+.body-map .muscle.secondary path { fill: color-mix(in srgb, var(--protein) 45%, var(--card)); }
+.body-map .muscle.primary path { fill: var(--protein); }
+.body-map .muscle.selected path { stroke: var(--text); stroke-width: 1.5; }
+.body-map .muscle[role="button"] { cursor: pointer; outline: none; }
+.body-map .muscle[role="button"]:focus-visible path { stroke: var(--accent); stroke-width: 2; }
+.body-map .map-label { font-size: 11px; fill: var(--muted); font-weight: 600; }
+.legend { display: flex; align-items: flex-start; gap: 8px; font-size: 0.88rem; margin-top: 6px; }
+.legend .sw { flex: none; margin-top: 3px; }
+.grow-wrap { flex: 1; }
+.legend .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.legend .sw.primary { background: var(--protein); }
+.legend .sw.secondary { background: color-mix(in srgb, var(--protein) 45%, var(--card)); }
+.muscle-info { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+.lib-search { margin-bottom: 10px; }
+
+.demo { width: 100%; height: auto; max-height: 260px; display: block; }
+.demo .ground { stroke: var(--line); stroke-width: 2; }
+.demo .limb { stroke: var(--accent); stroke-width: 7; stroke-linecap: round; }
+.demo .limb.far { opacity: 0.45; }
+.demo .head { fill: var(--accent); }
+.demo .joint { fill: var(--card); }
+.demo .torso-fill { fill: var(--accent); }
+.demo .ghost .limb { stroke: var(--muted); opacity: 0.22; }
+.demo .ghost .head, .demo .ghost .torso-fill { fill: var(--muted); opacity: 0.22; }
+.demo .ghost .joint, .demo .ghost .plate, .demo .ghost .prop, .demo .ghost .prop-line, .demo .ghost .cable { display: none; }
+.demo .plate { fill: var(--text); opacity: 0.8; }
+.demo .prop { fill: var(--line); }
+.demo .prop-line { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
+.demo .prop-line.thin { stroke-width: 2; }
+.demo .cable { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 3 3; }
+
+.steps { padding-left: 22px; margin: 6px 0 14px; }
+.steps li { margin: 6px 0; }
+.card h2 + p, .card h2 + ol, .card h2 + ul { margin-top: 6px; }
+.card > h2:not(:first-child) { margin-top: 14px; }
+.mistakes li::marker { content: '✕  '; color: var(--danger); }
+.safety-card { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.guide { width: 100%; border-collapse: collapse; font-size: 0.86rem; margin: 6px 0; }
+.guide th, .guide td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.guide th { color: var(--muted); font-weight: 600; }
+
+.ex-card .ex-title { display: flex; align-items: flex-start; gap: 8px; width: 100%; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.ex-card .ex-title h2 { margin-bottom: 2px; }
+.tip { background: var(--soft); border-radius: 10px; padding: 8px 10px; }
+.sets { margin: 6px 0; padding-left: 22px; }
+.sets li { padding: 0; }
+.sets li > * { vertical-align: middle; }
+.sets li { display: list-item; }
+.sets li .grow { display: inline-block; min-width: 60%; font-variant-numeric: tabular-nums; font-weight: 600; }
+.set-form input { width: 0; flex: 1; text-align: center; }
+.set-form .btn { flex: none; }
+.add-ex summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+
+.rest {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 40;
+  bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 10px);
+  width: min(528px, calc(100% - 32px));
+  display: flex; align-items: center; gap: 8px;
+  background: var(--text); color: var(--bg);
+  border-radius: 14px; padding: 8px 8px 8px 14px; font-size: 1.05rem;
+}
+.rest[hidden] { display: none; }
+.rest strong { font-variant-numeric: tabular-nums; font-size: 1.2rem; }
+.rest .btn.ghost { color: var(--bg); border-color: color-mix(in srgb, var(--bg) 40%, transparent); min-height: 38px; padding: 6px 12px; }
+
+.volume { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 7px; }
+.volume li { display: grid; grid-template-columns: 112px 1fr 34px; align-items: center; gap: 8px; font-size: 0.85rem; }
+.v-bar { position: relative; height: 10px; border-radius: 5px; background: var(--soft); overflow: hidden; }
+.v-zone { position: absolute; left: 40%; width: 40%; top: 0; bottom: 0; background: color-mix(in srgb, var(--ok) 18%, transparent); }
+.v-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: var(--muted); }
+.v-fill.ok { background: var(--ok); }
+.v-fill.hi { background: var(--warn); }
+.v-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.parq { padding-left: 20px; }
+.parq li { margin: 10px 0; }
+.parq li p { margin: 0 0 6px; }
+.parq .chip { min-width: 64px; }
+.alert { border-radius: 12px; padding: 12px; margin-top: 10px; }
+.alert p { margin: 4px 0 0; }
+.okbox { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.warnbox { background: color-mix(in srgb, var(--warn) 18%, transparent); }
+.dangerbox { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--card)); }
+.special { border-top: 1px solid var(--line); padding: 10px 0; }
+.special summary { font-weight: 600; cursor: pointer; }
+.refs { padding-left: 20px; }
+.refs li { margin: 10px 0; }
+.refs a { color: var(--accent); font-weight: 600; }
+.body-map .silhouette { pointer-events: none; }

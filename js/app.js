@@ -5,6 +5,7 @@ import {
 import { barChart, heatmap, weekdayChart } from './charts.js';
 import { h, uid, dayLabel, toast, modal, confirmDialog } from './ui.js';
 import { viewFood, freshFood, normalizeFood, foodSettingsCard, resetFoodView } from './food.js';
+import { viewGym, freshGym, normalizeGym, resetGymView } from './gym.js';
 
 
 const $app = document.getElementById('app');
@@ -33,7 +34,7 @@ let hiddenAt = 0;
 
 // ---------- state ----------
 function freshState() {
-  return { v: 1, trackers: [], entries: [], settings: { autoLock: 1 }, food: freshFood() };
+  return { v: 1, trackers: [], entries: [], settings: { autoLock: 1 }, food: freshFood(), gym: freshGym() };
 }
 
 /** Validate anything that comes from disk or a backup file. */
@@ -63,6 +64,7 @@ function normalize(raw) {
   const al = raw.settings?.autoLock;
   out.settings.autoLock = [0, 1, 5, 15, -1].includes(al) ? al : 1;
   out.food = normalizeFood(raw.food);
+  out.gym = normalizeGym(raw.gym);
   return out;
 }
 
@@ -318,6 +320,20 @@ function trendText(t, s) {
   const arrow = s.trend > 0 ? '↑' : '↓';
   if (s.trendPct !== null && Number.isFinite(s.trendPct)) return `${arrow} ${Math.round(Math.abs(s.trendPct) * 100)}%`;
   return `${arrow} ${num1.format(Math.abs(s.trend))}`;
+}
+
+let insightsSub = 'charts';
+
+function insightsSwitch() {
+  return h('div', { class: 'chips seg seg2', role: 'tablist' }, ...[['charts', 'Charts'], ['history', 'History']].map(([k, l]) => h('button', {
+    class: `chip${k === insightsSub ? ' on' : ''}`, role: 'tab', 'aria-selected': String(k === insightsSub), onclick: () => { insightsSub = k; render(); },
+  }, l)));
+}
+
+function viewInsightsTab() {
+  const sec = insightsSub === 'history' ? viewHistory() : viewInsights();
+  sec.prepend(insightsSwitch());
+  return sec;
 }
 
 function viewInsights() {
@@ -603,6 +619,7 @@ const foodCtx = {
   get state() { return state; },
   commit: () => commit(),
   render: () => render(),
+  save: () => vault.save(state).catch((err) => toast(`Couldn't save: ${err.message}`)),
 };
 
 // ---------- lock screen ----------
@@ -656,8 +673,8 @@ function showLock() {
 const TABS = [
   ['today', 'Today', 'M4 6h16M4 12h16M4 18h10'],
   ['food', 'Food', 'M6 3v7a2 2 0 0 0 4 0V3M8 3v18M17 21V3c-2.2 0-4 2.7-4 7v3h4'],
+  ['gym', 'Gym', 'M6.5 7v10M3.5 9.5v5M17.5 7v10M20.5 9.5v5M6.5 12h11'],
   ['insights', 'Insights', 'M5 20V11M12 20V4M19 20v-6'],
-  ['history', 'History', 'M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z'],
   ['settings', 'Settings', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'],
 ];
 
@@ -675,12 +692,12 @@ function render() {
   if (!state) return;
   const scroll = view === render.lastView ? window.scrollY : 0;
   render.lastView = view;
-  const views = { today: viewToday, food: () => viewFood(foodCtx), insights: viewInsights, history: viewHistory, settings: viewSettings };
+  const views = { today: viewToday, food: () => viewFood(foodCtx), gym: () => viewGym(foodCtx), insights: viewInsightsTab, settings: viewSettings };
   $app.replaceChildren(views[view]());
   $tabs.hidden = false;
   $tabs.replaceChildren(...TABS.map(([id, label, d]) => h('button', {
     class: `tab${id === view ? ' on' : ''}`, 'aria-current': id === view ? 'page' : null,
-    onclick: () => { if (id !== view) { if (id === 'today') curDay = dayKey(); if (id === 'food') resetFoodView(); } view = id; render(); },
+    onclick: () => { if (id !== view) { if (id === 'today') curDay = dayKey(); if (id === 'food') resetFoodView(); if (id === 'gym') resetGymView(); } view = id; render(); },
   }, icon(d), h('span', {}, label))));
   window.scrollTo(0, scroll);
 }

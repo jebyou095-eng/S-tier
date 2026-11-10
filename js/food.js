@@ -71,7 +71,7 @@ const dayLog = (day) => F().log.filter((e) => e.day === day);
 const totals = (list) => sum(list.map((e) => scale(e.n, e.grams)));
 
 function remember(food) {
-  if (food.source === 'USDA' && food.id && !food.id.includes(':')) return; // built-in, no need to save
+  if (food.id && !food.id.includes(':')) return; // built-in table, no need to save
   const saved = F().saved;
   const i = saved.findIndex((s) => s.id === food.id || (food.code && s.code === food.code));
   const clean = cleanFood(food);
@@ -114,7 +114,8 @@ async function ensureOnline() {
 
 // ---------- dialogs ----------
 function sourceBadge(food) {
-  return h('span', { class: `src src-${food.source === 'Open Food Facts' ? 'off' : food.source === 'USDA' ? 'usda' : 'you'}` }, food.source);
+  const cls = { 'Open Food Facts': 'off', USDA: 'usda', Estimate: 'est' }[food.source] || 'you';
+  return h('span', { class: `src src-${cls}`, title: food.source === 'Estimate' ? 'Typical home recipe. Values vary; weigh and adjust.' : null }, food.source === 'Estimate' ? 'Estimate' : food.source);
 }
 
 function macroLine(n) {

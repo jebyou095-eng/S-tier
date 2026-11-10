@@ -80,10 +80,31 @@ const RAW = [
   ['hummus', 'Hummus', 166, 7.9, 14.3, 9.6, 6.0, 60, '¼ cup', 'vg'],
   ['dark-chocolate', 'Dark chocolate 70–85%', 598, 7.8, 45.9, 42.6, 10.9, 20, '2 squares', 'vg'],
   ['honey', 'Honey', 304, 0.3, 82.4, 0, 0.2, 21, '1 tbsp', 'v'],
+  // Moroccan staples: USDA values where an equivalent exists
+  ['couscous', 'Couscous, cooked (kesksou)', 112, 3.8, 23.2, 0.2, 1.4, 160, '1 cup', 'vg'],
+  ['sardines', 'Sardines in oil, drained (sardine)', 208, 24.6, 0, 11.5, 0, 90, '1 can', 'p'],
+  ['fava', 'Fava beans, cooked (foul)', 110, 7.6, 19.7, 0.4, 5.4, 170, '1 cup', 'pvg'],
+  ['olives-green', 'Olives, green (zitoun)', 145, 1.0, 3.8, 15.3, 3.3, 30, '8 olives', 'vg'],
+  ['olives-black', 'Olives, black (zitoun)', 115, 0.8, 6.3, 10.7, 3.2, 30, '8 olives', 'vg'],
+  // Moroccan home dishes: typical-recipe ESTIMATES (recipes vary a lot; weigh and adjust)
+  ['khobz', 'Khobz (Moroccan round bread)', 255, 8.5, 51, 1.5, 2.5, 100, '¼ loaf', 'vg', 'Estimate'],
+  ['msemen', 'Msemen / rghaif', 330, 7, 45, 13, 2, 80, '1 piece', 'v', 'Estimate'],
+  ['harcha', 'Harcha (semolina flatbread)', 380, 7, 52, 16, 2.5, 70, '1 piece', 'v', 'Estimate'],
+  ['baghrir', 'Baghrir (1000-hole pancake)', 190, 5.5, 38, 1.5, 1.5, 60, '1 piece', 'v', 'Estimate'],
+  ['harira', 'Harira (soup)', 60, 3.2, 9, 1.3, 2, 300, '1 bowl', '', 'Estimate'],
+  ['bissara', 'Bissara (fava bean soup)', 95, 5.5, 13, 2.5, 4, 300, '1 bowl', 'vg', 'Estimate'],
+  ['tagine-chicken', 'Chicken tagine with vegetables', 120, 11, 6, 6, 1.5, 350, '1 plate', 'p', 'Estimate'],
+  ['tagine-meat', 'Beef or lamb tagine', 150, 12, 6, 9, 1.5, 350, '1 plate', 'p', 'Estimate'],
+  ['kefta', 'Kefta, grilled (minced meat)', 250, 20, 2, 18, 0, 100, '4 skewers', 'p', 'Estimate'],
+  ['lben', 'Lben (fermented milk)', 45, 3.3, 4.5, 1.5, 0, 250, '1 glass', 'v', 'Estimate'],
+  ['jben', 'Jben (fresh cheese)', 160, 11, 3, 11.5, 0, 50, '1 piece', 'pv', 'Estimate'],
+  ['amlou', 'Amlou (almond, argan oil, honey)', 600, 17, 20, 52, 6, 20, '1 tbsp', 'v', 'Estimate'],
+  ['chebakia', 'Chebakia', 470, 6, 60, 23, 2, 30, '1 piece', 'v', 'Estimate'],
+  ['atay', 'Mint tea with sugar (atay)', 40, 0, 10, 0, 0, 120, '1 glass', 'vg', 'Estimate'],
 ];
 
-export const FOODS = RAW.map(([id, name, kcal, p, c, f, fib, serving, servingLabel, tags]) => ({
-  id, name, source: 'USDA', n: { kcal, p, c, f, fib }, serving, servingLabel, tags,
+export const FOODS = RAW.map(([id, name, kcal, p, c, f, fib, serving, servingLabel, tags, source = 'USDA']) => ({
+  id, name, source, n: { kcal, p, c, f, fib }, serving, servingLabel, tags,
 }));
 
 export const FOOD_BY_ID = Object.fromEntries(FOODS.map((x) => [x.id, x]));

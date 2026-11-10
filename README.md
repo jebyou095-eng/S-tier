@@ -2,7 +2,7 @@
 
 A private, offline analytics app for your phone. Track anything (mood, sleep, water, workouts, spending, your own trackers), then see charts, streaks, trends, weekday patterns and connections between trackers.
 
-It also has a **food scanner and calorie counter** with a **bulking / body-recomposition planner**: scan a barcode with your camera, check the calories and macros against more than one trusted source, and follow a meal plan sized to your body and goal.
+It also has a **gym section** (exercise library with muscle maps, animated form demos, a workout logger and a safety & evidence guide) and a **food scanner and calorie counter** with a **bulking / body-recomposition planner**: scan a barcode with your camera, check the calories and macros against more than one trusted source, and follow a meal plan sized to your body and goal.
 
 ## Privacy, by design
 
@@ -33,6 +33,10 @@ The host only ever serves the app's code. Your entries are created and stored on
 - **Today:** quick logging (yes/no toggles, 1–5 ratings, numbers with units and daily goals). You can step back to log past days, and undo.
 - **Insights:** week, month, 3-month and year views. Averages, totals, ranges, trend vs. the earlier half of the period, daily bar charts, calendar heatmaps, weekday patterns, streaks, goal hit-rate, and *Connections* (correlations between trackers).
 - **History:** every entry, filterable, with deletion.
+- **Gym → Workout:** evidence-based programs (full body 3×/week, upper/lower 4×, push/pull/legs), set logging with rest timer, last-session recall and progressive-overload hints.
+- **Gym → Exercises:** 33 exercises. Tap a muscle on the front/back body map to see what trains it. Each exercise has an animated start ↔ end demonstration, highlighted main and helper muscles, starting position, step-by-step technique, cues, common mistakes, safety notes, sets/reps/rest by goal, and alternatives.
+- **Gym → Progress:** workouts per week, estimated 1-rep-max trend per exercise, weekly hard sets per muscle vs. the 10–20 set target, personal bests.
+- **Gym → Safety:** PAR-Q+-based health check, red-flag symptoms (with Moroccan emergency numbers), soreness vs. injury, guidance for high blood pressure/heart disease, pregnancy, teens, back pain, diabetes and Ramadan, plus the research and guidelines used (WHO, ACSM, AHA, ACOG, NSCA and peer-reviewed meta-analyses), each linked to PubMed.
 - **Food → Diary:** scan a barcode or search, pick a portion, and see calories, protein, carbs, fat and fiber against your targets. It suggests protein-rich foods to close the day's gap.
 - **Food → Plan:** your calorie and macro targets (Mifflin–St Jeor × activity, adjusted for bulk, lean bulk, recomp or cut; protein 1.8–2.2 g/kg), a sample day scaled to hit them (omnivore or vegetarian), and evidence-based training and nutrition tips.
 - **Food → Progress:** weekly weight-change rate vs. the right range for your goal, with a suggested calorie adjustment, plus 14-day calorie and protein charts.
@@ -42,7 +46,7 @@ The host only ever serves the app's code. Your entries are created and stored on
 
 | Source | Used for | Network |
 | --- | --- | --- |
-| Built-in table (`js/foods.js`) | ~70 common whole foods, USDA reference values | None, works offline |
+| Built-in table (`js/foods.js`) | ~75 common foods (USDA reference values) plus Moroccan dishes (khobz, msemen, harira, tagine, bissara…) as clearly labelled typical-recipe *estimates* | None, works offline |
 | [USDA FoodData Central](https://fdc.nal.usda.gov/) | Generic and branded foods (US government) | Opt-in |
 | [Open Food Facts](https://world.openfoodfacts.org/) | Packaged products by barcode, worldwide | Opt-in |
 | You | Values typed from a nutrition label | None |
@@ -69,5 +73,9 @@ python3 -m http.server 8000
 | `js/foods.js` | Built-in food table + meal-plan templates |
 | `js/nutrition.js` | Targets, plan scaling, USDA / Open Food Facts lookups |
 | `js/scanner.js` | On-device camera barcode scanner |
+| `js/gym.js` | Gym tab: workout logger, library, progress, safety |
+| `js/exercises.js` | Exercise library, muscles, programs, references |
+| `js/body.js` | 2D front/back muscle maps |
+| `js/poses.js` | Animated exercise demonstrations |
 | `js/ui.js` | Shared UI helpers |
 | `sw.js` | Offline cache (app files only) |
