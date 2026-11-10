@@ -8369,9 +8369,13 @@ async function getModelFiles() {
   const cached = await cacheGet('ml:mobilenet').catch(() => null);
   if (cached?.json && cached?.bin) return cached;
   const opts = { credentials: 'omit', referrerPolicy: 'no-referrer' };
-  const [jr, br] = await Promise.all([fetch(repoFile(`${MODEL_DIR}model.json`), opts), fetch(repoFile(`${MODEL_DIR}group1-shard1of1.bin`), opts)]);
+  // The claude.ai web link can't serve binary files, so there the weights come as base64 text.
+  const hosted = !!globalThis.POCKET_STATS_HOSTED;
+  const weights = hosted ? `${MODEL_DIR}weights.b64.txt` : `${MODEL_DIR}group1-shard1of1.bin`;
+  const [jr, br] = await Promise.all([fetch(repoFile(`${MODEL_DIR}model.json`), opts), fetch(repoFile(weights), opts)]);
   if (!jr.ok || !br.ok) throw new Error('Could not download the scanner model');
-  const files = { json: await jr.json(), bin: await br.arrayBuffer() };
+  const bin = hosted ? Uint8Array.from(atob((await br.text()).trim()), (c) => c.charCodeAt(0)).buffer : await br.arrayBuffer();
+  const files = { json: await jr.json(), bin };
   cacheSet('ml:mobilenet', files).catch(() => {});
   return files;
 }

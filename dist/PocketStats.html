@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-W/RPvCMcdqn+hSTTcVLrlrljS72p0CGcvQCyeQuth9I='; style-src 'sha256-u9mrNGTQ8v0NUqxl002gxkiqfVE9cfLHZNiNurMtA4w='; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-tq2wRgAHh4M8yfC5B1c+VHx+Y5Ur9mzqtuzaVEMNuSo='; style-src 'sha256-u9mrNGTQ8v0NUqxl002gxkiqfVE9cfLHZNiNurMtA4w='; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#2f7d6d">
@@ -8405,9 +8405,13 @@ async function getModelFiles() {
   const cached = await cacheGet('ml:mobilenet').catch(() => null);
   if (cached?.json && cached?.bin) return cached;
   const opts = { credentials: 'omit', referrerPolicy: 'no-referrer' };
-  const [jr, br] = await Promise.all([fetch(repoFile(`${MODEL_DIR}model.json`), opts), fetch(repoFile(`${MODEL_DIR}group1-shard1of1.bin`), opts)]);
+  // The claude.ai web link can't serve binary files, so there the weights come as base64 text.
+  const hosted = !!globalThis.POCKET_STATS_HOSTED;
+  const weights = hosted ? `${MODEL_DIR}weights.b64.txt` : `${MODEL_DIR}group1-shard1of1.bin`;
+  const [jr, br] = await Promise.all([fetch(repoFile(`${MODEL_DIR}model.json`), opts), fetch(repoFile(weights), opts)]);
   if (!jr.ok || !br.ok) throw new Error('Could not download the scanner model');
-  const files = { json: await jr.json(), bin: await br.arrayBuffer() };
+  const bin = hosted ? Uint8Array.from(atob((await br.text()).trim()), (c) => c.charCodeAt(0)).buffer : await br.arrayBuffer();
+  const files = { json: await jr.json(), bin };
   cacheSet('ml:mobilenet', files).catch(() => {});
   return files;
 }
