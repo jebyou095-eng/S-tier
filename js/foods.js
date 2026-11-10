@@ -115,7 +115,7 @@ export function searchLocal(q, extra = []) {
   if (!words.length) return [];
   return [...extra, ...FOODS]
     .map((f) => {
-      const hay = `${f.name} ${f.brand || ''}`.toLowerCase();
+      const hay = f.hay || `${f.name} ${f.brand || ''} ${f.alt || ''}`.toLowerCase();
       if (!words.every((w) => hay.includes(w))) return null;
       return { f, score: (hay.startsWith(words[0]) ? 0 : 1) + hay.length / 100 };
     })

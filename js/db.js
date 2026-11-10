@@ -39,6 +39,10 @@ const idbGet = (k) => tx('readonly', (s) => s.get(k));
 const idbSet = (k, v) => tx('readwrite', (s) => s.put(v, k));
 const idbClear = () => tx('readwrite', (s) => s.clear());
 
+/** Non-personal cache (public food database, product photos). Not encrypted: it holds no personal data. */
+export const cacheGet = (k) => idbGet(`cache:${k}`);
+export const cacheSet = (k, v) => idbSet(`cache:${k}`, v);
+
 const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
 
 async function deriveKey(pass, saltBytes, iter) {

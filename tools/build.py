@@ -100,7 +100,7 @@ def main():
     csp = ("default-src 'none'; "
            f"script-src {sha(zxing)} {sha(app)}; style-src {sha(css)}; "
            "img-src data: blob:; media-src blob: mediastream:; "
-           "connect-src https://world.openfoodfacts.org https://api.nal.usda.gov; base-uri 'none'; form-action 'none'")
+           "connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'")
     full = f'''<!doctype html>
 <html lang="en">
 <head>

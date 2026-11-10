@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <!-- Strict privacy: code loads only from this app. The only hosts the page can contact are the two food
-       databases, and the app only does that after you allow it (Settings → Food lookups). -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; manifest-src 'self'; worker-src 'self'; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov; base-uri 'none'; form-action 'none'">
+  <!-- Strict privacy: code loads only from this app. The page can contact only: the app's own GitHub repo
+       (public Moroccan food list and photos) and the two food databases, which it uses only after you allow it. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; manifest-src 'self'; worker-src 'self'; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

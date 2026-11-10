@@ -6,6 +6,13 @@ import { barChart, heatmap, weekdayChart } from './charts.js';
 import { h, uid, dayLabel, toast, modal, confirmDialog } from './ui.js';
 import { viewFood, freshFood, normalizeFood, foodSettingsCard, resetFoodView } from './food.js';
 import { viewGym, freshGym, normalizeGym, resetGymView } from './gym.js';
+import { loadFoodDb } from './fooddb.js';
+
+/** Load the Moroccan food list (from the phone's cache, refreshing from GitHub weekly). */
+function warmFoodDb() {
+  if (state?.food?.moroccoDb === false) return;
+  loadFoodDb().then(() => { if (view === 'settings') render(); }).catch(() => { /* offline: try again next launch */ });
+}
 
 
 const $app = document.getElementById('app');
@@ -628,7 +635,7 @@ function viewSettings() {
         h('li', {}, 'Barcode scanning happens on the phone. Camera images are never saved or sent.'),
         h('li', {}, 'Works fully offline once opened.'),
         h('li', {}, 'With a passcode, data is encrypted at rest and hidden in the app switcher.'))),
-    h('p', { class: 'muted small center' }, 'Pocket Stats v1.0'));
+    h('p', { class: 'muted small center' }, 'Pocket Stats v1.1'));
 }
 
 // Context handed to the Food tab so it can read and save shared state.
@@ -662,6 +669,7 @@ function showLock() {
       try {
         state = normalize(await vault.unlock(input.value));
         render();
+        warmFoodDb();
       } catch {
         err.textContent = 'Wrong passcode.'; err.hidden = false;
         btn.disabled = false; btn.textContent = 'Unlock';
@@ -746,6 +754,7 @@ async function boot() {
     state = normalize(res.state);
     if (!res.state) await vault.save(state);
     render();
+    warmFoodDb();
   } catch (err) {
     $app.replaceChildren(h('div', { class: 'card' }, h('h2', {}, "Storage isn't available"),
       h('p', { class: 'muted' }, 'This browser is blocking local storage (private browsing mode can do this). Open the app in a normal tab or from your home screen.'),

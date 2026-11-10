@@ -7,6 +7,7 @@ import {
   ACTIVITY, GOALS, targets, scale, sum, lookupBarcode, searchOnline, agreement, buildPlan, suggestions,
 } from './nutrition.js';
 import { scanBarcode, canonicalBarcode } from './scanner.js';
+import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable } from './fooddb.js';
 
 const MEALS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' };
 const k0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
@@ -21,7 +22,7 @@ const F = () => ctx.state.food;
 
 // ---------- data ----------
 export function freshFood() {
-  return { profile: null, log: [], saved: [], online: false, usdaKey: '' };
+  return { profile: null, log: [], saved: [], online: false, usdaKey: '', moroccoDb: true, photos: true };
 }
 
 const num = (x, lo, hi) => (Number.isFinite(+x) && +x >= lo && +x <= hi ? +x : null);
@@ -39,6 +40,7 @@ function cleanFood(x) {
   return {
     id: str(x.id || uid(), 60), name: str(x.name, 80), brand: str(x.brand, 40), source: str(x.source, 30) || 'You',
     code: str(x.code, 14).replace(/\D/g, ''), n, serving: num(x.serving, 1, 5000) ?? 100, servingLabel: str(x.servingLabel, 30) || '100 g',
+    img: /^img\/[\w/-]+\.jpg$/.test(x.img || '') ? x.img : '', emoji: str(x.emoji, 4),
   };
 }
 
@@ -63,6 +65,8 @@ export function normalizeFood(raw) {
     if (food) out.saved.push(food);
   }
   out.online = raw.online === true;
+  out.moroccoDb = raw.moroccoDb !== false;
+  out.photos = raw.photos !== false;
   out.usdaKey = /^[A-Za-z0-9]{0,64}$/.test(raw.usdaKey || '') ? raw.usdaKey || '' : '';
   return out;
 }
@@ -151,8 +155,13 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false } = {}) {
       class: 'sheet-body',
       onsubmit: (e) => { e.preventDefault(); const g = val(); if (g > 0 && g < 10000) done({ grams: g, meal: meal.value }); },
     },
-    h('h2', {}, food.name),
-    h('p', { class: 'muted small' }, food.brand ? `${food.brand} · ` : '', sourceBadge(food)),
+    h('div', { class: 'portion-head' },
+      foodThumb(food, { size: 'lg', photos: photosOn() }),
+      h('div', { class: 'grow-wrap' },
+        h('h2', {}, food.name),
+        food.fr || food.ar ? h('p', { class: 'muted small' }, food.fr || '', food.ar ? h('span', { lang: 'ar', dir: 'rtl' }, ` · ${food.ar}`) : null) : null,
+        h('p', { class: 'muted small' }, food.brand ? `${food.brand} · ` : '', food.qty ? `${food.qty} · ` : '', sourceBadge(food),
+          food.where ? ` · ${WHERE_LABEL[food.where] || ''}` : ''))),
     h('p', { class: 'muted small' }, `Per 100 g: ${macroLine(food.n)}`),
     h('div', { class: 'chips' }, ...quick),
     h('div', { class: 'row' }, h('label', { class: 'field grow' }, h('span', {}, 'Grams'), grams), h('label', { class: 'field grow' }, h('span', {}, 'Meal'), meal)),
@@ -211,23 +220,34 @@ function labelDialog({ code = '', name = '' } = {}) {
   });
 }
 
+const WHERE_LABEL = { supermarket: 'Supermarket', souk: 'Souk', street: 'Street food', cafe: 'Café', bakery: 'Bakery', home: 'Home cooking' };
+const photosOn = () => F().photos !== false;
+
 function resultRow(food, onPick) {
   return h('li', {},
-    h('button', { class: 'result', type: 'button', onclick: () => onPick(food) },
-      h('span', { class: 'r-name' }, food.name, food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null),
-      h('span', { class: 'r-meta' }, sourceBadge(food), ` ${k0.format(food.n.kcal)} kcal · ${k1.format(food.n.p)} g protein /100 g`)));
+    h('button', { class: 'result with-thumb', type: 'button', onclick: () => onPick(food) },
+      foodThumb(food, { photos: photosOn() }),
+      h('span', { class: 'r-text' },
+        h('span', { class: 'r-name' }, food.name, food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null,
+          food.ar ? h('span', { class: 'r-ar', lang: 'ar', dir: 'rtl' }, ` ${food.ar}`) : null),
+        h('span', { class: 'r-meta' }, sourceBadge(food), food.where ? ` ${WHERE_LABEL[food.where] || ''} ·` : '', ` ${k0.format(food.n.kcal)} kcal · ${k1.format(food.n.p)} g protein /100 g`))));
+}
+
+function dedupe(list) {
+  const seen = new Set();
+  return list.filter((f) => (seen.has(f.id) ? false : seen.add(f.id)));
 }
 
 /** Search sheet. Built-in + saved foods instantly; online sources on request. */
 function searchDialog(meal) {
   return modal((done) => {
-    const q = h('input', { type: 'search', placeholder: 'Search foods (e.g. chicken, oats, Greek yogurt)', 'aria-label': 'Search foods', autofocus: true, enterkeyhint: 'search' });
+    const q = h('input', { type: 'search', placeholder: 'Search: msemen, Jaouda, harira, banane…', 'aria-label': 'Search foods', autofocus: true, enterkeyhint: 'search' });
     const list = h('ul', { class: 'results' });
     const online = h('ul', { class: 'results' });
     const status = h('p', { class: 'muted small' });
     const pick = (food) => done(food);
     const local = () => {
-      const res = searchLocal(q.value, F().saved).slice(0, 25);
+      const res = dedupe(searchLocal(q.value, [...F().saved, ...(F().moroccoDb ? foodDb() : [])])).slice(0, 30);
       list.replaceChildren(...res.map((f) => resultRow(f, pick)));
       if (!q.value.trim()) {
         const recent = F().saved.slice(0, 8);
@@ -274,6 +294,57 @@ function chooseDialog(code, results) {
       h('button', { class: 'btn ghost', onclick: () => done(null) }, 'Cancel'))));
 }
 
+/** Catalogue of Moroccan foods from the repo database, by where they're sold. */
+function browseDialog(meal) {
+  return modal((done) => {
+    let where = 'supermarket'; let cat = ''; let limit = 40;
+    const q = h('input', { type: 'search', placeholder: 'Filter (name, brand, Darija…)', 'aria-label': 'Filter Moroccan foods' });
+    const whereChips = h('div', { class: 'chips' });
+    const catChips = h('div', { class: 'chips cats' });
+    const list = h('ul', { class: 'results' });
+    const status = h('p', { class: 'muted small' });
+    const more = h('button', { class: 'btn ghost wide', type: 'button', hidden: true, onclick: () => { limit += 60; draw(); } }, 'Show more');
+    const draw = () => {
+      const all = foodDb();
+      if (!all.length) { list.replaceChildren(); return; }
+      whereChips.replaceChildren(...Object.entries(WHERE_LABEL).filter(([k]) => all.some((f) => f.where === k)).map(([k, l]) => h('button', {
+        type: 'button', class: `chip${k === where ? ' on' : ''}`, onclick: () => { where = k; cat = ''; limit = 40; draw(); },
+      }, l)));
+      const inWhere = all.filter((f) => f.where === where);
+      const cats = [...new Set(inWhere.map((f) => f.cat).filter(Boolean))].sort();
+      catChips.replaceChildren(...['', ...cats].map((c) => h('button', {
+        type: 'button', class: `chip small${c === cat ? ' on' : ''}`, onclick: () => { cat = c; limit = 40; draw(); },
+      }, c || 'All')));
+      const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+      const shown = inWhere.filter((f) => (!cat || f.cat === cat) && words.every((w) => f.hay.includes(w)));
+      list.replaceChildren(...shown.slice(0, limit).map((f) => resultRow(f, done)));
+      more.hidden = shown.length <= limit;
+      status.textContent = `${shown.length} foods`;
+    };
+    q.addEventListener('input', () => { limit = 40; draw(); });
+    const off = onFoodDb(draw);
+    const close = (v) => { off(); done(v); };
+    if (!foodDb().length) {
+      status.textContent = 'Downloading the Moroccan food list from GitHub…';
+      loadFoodDb({ force: true }).then(draw).catch(() => {
+        status.textContent = "Couldn't download the food list. Check your connection and try again.";
+      });
+    }
+    draw();
+    const meta = foodDbMeta();
+    return h('div', { class: 'sheet-body search browse' },
+      h('h2', {}, `Moroccan foods · ${MEALS[meal]}`),
+      whereChips, catChips, q, status, list, more,
+      h('p', { class: 'muted small' }, meta.attribution || ''),
+      h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => close(null) }, 'Close')));
+  });
+}
+
+async function browseFlow(meal = defaultMeal()) {
+  const food = await browseDialog(meal);
+  if (food) return pickAndLog(food, meal);
+}
+
 // ---------- flows ----------
 async function pickAndLog(food, meal) {
   if (!food) return;
@@ -293,6 +364,8 @@ async function scanFlow() {
   const code = canonicalBarcode(raw);
   const known = F().saved.find((s) => s.code && (s.code === code || s.code === raw));
   if (known) return pickAndLog(known);
+  const local = F().moroccoDb ? (findByCode(code) || findByCode(raw)) : null;
+  if (local) return pickAndLog(local);
   if (!await ensureOnline()) {
     toast(globalThis.POCKET_STATS_HOSTED ? `Barcode ${code} read. Enter its label once; next time this scan finds it instantly.` : 'Not in your saved foods. Enter it from the label instead.');
     return pickAndLog(await labelDialog({ code }));
@@ -446,7 +519,8 @@ function viewDiary() {
 
   const actions = h('div', { class: 'scan-actions' },
     h('button', { class: 'btn primary big-btn', onclick: scanFlow }, h('span', { 'aria-hidden': 'true' }, '▥ '), 'Scan barcode'),
-    h('button', { class: 'btn ghost big-btn', onclick: () => searchFlow() }, h('span', { 'aria-hidden': 'true' }, '⌕ '), 'Search food'));
+    h('button', { class: 'btn ghost big-btn', onclick: () => searchFlow() }, h('span', { 'aria-hidden': 'true' }, '⌕ '), 'Search food'),
+    F().moroccoDb ? h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => browseFlow() }, h('span', { 'aria-hidden': 'true' }, '🇲🇦 '), 'Moroccan foods: supermarket, souk & street') : null);
 
   const setup = !p ? h('article', { class: 'card callout' },
     h('h2', {}, 'Set your goal'),
@@ -633,6 +707,22 @@ export function foodSettingsCard(c) {
         F().usdaKey = v; await ctx.commit(); toast('Saved');
       },
     }, 'Save key')]),
+    h('h3', {}, 'Moroccan food database'),
+    h('label', { class: 'switch-row' },
+      h('span', { class: 'grow' }, 'Use the Moroccan food list', h('span', { class: 'muted small block' }, 'Supermarket products plus souk, street and home foods. Downloaded from this app’s GitHub repo about once a week; it holds no personal data and nothing about you is sent.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: F().moroccoDb, onchange: async (e) => { F().moroccoDb = e.target.checked; await ctx.commit(); if (e.target.checked) loadFoodDb().catch(() => {}); } })),
+    photosAvailable() ? h('label', { class: 'switch-row' },
+      h('span', { class: 'grow' }, 'Show product photos', h('span', { class: 'muted small block' }, 'Each photo downloads from GitHub the first time you see it, then stays on your phone.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: F().photos, onchange: async (e) => { F().photos = e.target.checked; await ctx.commit(); } })) : null,
+    F().moroccoDb ? h('p', { class: 'muted small' }, foodDb().length
+      ? `${foodDb().length.toLocaleString()} foods · list from ${foodDbMeta().version || '?'} · checked ${new Date(foodDbMeta().fetched).toLocaleDateString()}`
+      : 'Not downloaded yet.') : null,
+    F().moroccoDb ? h('button', {
+      class: 'btn ghost', onclick: async () => {
+        toast('Updating food list…');
+        try { const n = await loadFoodDb({ force: true }); toast(`Food list updated: ${n.toLocaleString()} foods`); ctx.render(); } catch { toast("Couldn't reach GitHub. Try again later."); }
+      },
+    }, 'Update food list now') : null,
     h('p', { class: 'muted small' }, `${F().saved.length} saved foods · ${F().log.length} diary entries`),
     F().saved.length ? h('button', {
       class: 'btn ghost', onclick: async () => {

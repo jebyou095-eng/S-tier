@@ -52,6 +52,7 @@ The host only ever serves the app's code. Your entries are created and stored on
 
 | Source | Used for | Network |
 | --- | --- | --- |
+| **Moroccan food list** (`data/foods-morocco.json`, served from this repo) | ~9,000 packaged products sold in Moroccan supermarkets (Open Food Facts) plus souk, street, café, bakery and home foods with French and Darija names. Downloaded about once a week, then searched offline; product photos load on demand. See `data/README.md`. | Download of a public list only |
 | Built-in table (`js/foods.js`) | ~75 common foods (USDA reference values) plus Moroccan dishes (khobz, msemen, harira, tagine, bissara…) as clearly labelled typical-recipe *estimates* | None, works offline |
 | [USDA FoodData Central](https://fdc.nal.usda.gov/) | Generic and branded foods (US government) | Opt-in |
 | [Open Food Facts](https://world.openfoodfacts.org/) | Packaged products by barcode, worldwide | Opt-in |

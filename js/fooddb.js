@@ -1,0 +1,126 @@
+// Moroccan food database, served from the app's GitHub repo (data/ folder).
+// The whole list downloads once (about 1–2 MB) and is then searched offline.
+// Product photos load only when shown, then stay cached on the phone.
+// Nothing about you is sent: GitHub only sees that the public list or a photo was requested.
+import { cacheGet, cacheSet } from './db.js';
+
+const REPO = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/HEAD/data/';
+const HOSTED = !!globalThis.POCKET_STATS_HOSTED;
+const BASE = HOSTED ? 'data/' : REPO; // web-link version ships the list next to the page
+const MAX_AGE = 7 * 24 * 3600 * 1000;
+
+let foods = [];
+let byCode = new Map();
+let meta = { version: null, fetched: 0, attribution: '', where: {} };
+let loading = null;
+const listeners = new Set();
+
+const FETCH = { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' };
+
+function adopt(json, fetched) {
+  const list = Array.isArray(json?.foods) ? json.foods : [];
+  foods = list.filter((x) => x && x.n && Number.isFinite(+x.k)).map((x) => ({
+    id: String(x.id).slice(0, 40),
+    name: String(x.n).slice(0, 80),
+    brand: String(x.b || '').slice(0, 40),
+    alt: `${x.fr || ''} ${x.ar || ''}`.trim(),
+    fr: x.fr || '', ar: x.ar || '',
+    source: x.src === 'Estimate' ? 'Estimate' : x.src === 'USDA' ? 'USDA' : 'Open Food Facts',
+    n: { kcal: +x.k, p: +x.p || 0, c: +x.c || 0, f: +x.f || 0, fib: +x.fi || 0 },
+    serving: +x.s > 0 ? +x.s : 100,
+    servingLabel: String(x.sl || '100 g').slice(0, 30),
+    code: String(x.code || ''),
+    img: typeof x.img === 'string' && /^img\/[\w/-]+\.jpg$/.test(x.img) ? x.img : '',
+    emoji: typeof x.e === 'string' ? x.e.slice(0, 4) : '',
+    where: String(x.w || ''), cat: String(x.cat || ''), qty: String(x.q || ''), nutri: x.ns || '',
+  }));
+  for (const f of foods) f.hay = `${f.name} ${f.brand} ${f.alt}`.toLowerCase();
+  byCode = new Map(foods.filter((f) => f.code).map((f) => [f.code, f]));
+  meta = { version: json.version || null, fetched, attribution: json.attribution || '', where: json.where || {} };
+  listeners.forEach((fn) => fn());
+}
+
+/** Load from the phone's cache, then refresh from GitHub if a week old (or forced). */
+export function loadFoodDb({ force = false, allowNetwork = true } = {}) {
+  if (loading && !force) return loading;
+  loading = (async () => {
+    let cached = null;
+    try { cached = await cacheGet('fooddb'); } catch { /* storage unavailable */ }
+    if (cached && !foods.length) adopt(cached.json, cached.fetched);
+    const stale = !cached || Date.now() - cached.fetched > MAX_AGE;
+    if (allowNetwork && (force || stale)) {
+      try {
+        const r = await fetch(`${BASE}foods-morocco.json`, FETCH);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const json = await r.json();
+        const fetched = Date.now();
+        adopt(json, fetched);
+        try { await cacheSet('fooddb', { json, fetched }); } catch { /* ignore */ }
+      } catch (err) {
+        if (!foods.length) throw err;
+      }
+    }
+    return foods.length;
+  })();
+  return loading.finally(() => { loading = null; });
+}
+
+export const foodDb = () => foods;
+export const foodDbMeta = () => meta;
+export const findByCode = (code) => byCode.get(code) || byCode.get(code.replace(/^0+/, '')) || null;
+export const onFoodDb = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
+export const photosAvailable = () => !HOSTED;
+
+// ---------- photos ----------
+const urls = new Map();
+async function photoUrl(path) {
+  if (urls.has(path)) return urls.get(path);
+  let blob = null;
+  try { blob = await cacheGet(`img:${path}`); } catch { /* ignore */ }
+  if (!blob) {
+    const r = await fetch(`${BASE}${path}`, FETCH);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    blob = await r.blob();
+    if (!/^image\//.test(blob.type) && blob.type) throw new Error('not an image');
+    try { await cacheSet(`img:${path}`, blob); } catch { /* ignore */ }
+  }
+  const url = URL.createObjectURL(blob);
+  urls.set(path, url);
+  return url;
+}
+
+let observer = null;
+function observe(el, fn) {
+  if (!('IntersectionObserver' in globalThis)) { fn(); return; }
+  observer ??= new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      observer.unobserve(e.target);
+      e.target.__load?.();
+    }
+  }, { rootMargin: '200px' });
+  el.__load = fn;
+  observer.observe(el);
+}
+
+/** A square thumbnail: product photo when available, else the food's icon. */
+export function foodThumb(food, { size = 'sm', photos = true } = {}) {
+  const box = document.createElement('span');
+  box.className = `thumb thumb-${size}`;
+  box.setAttribute('aria-hidden', 'true');
+  box.textContent = food.emoji || (food.source === 'Open Food Facts' ? '🛒' : '🍽️');
+  if (food.img && photos && !HOSTED) {
+    observe(box, async () => {
+      try {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.decoding = 'async';
+        img.src = await photoUrl(food.img);
+        box.textContent = '';
+        box.append(img);
+        box.classList.add('has-photo');
+      } catch { /* keep the icon */ }
+    });
+  }
+  return box;
+}
