@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-07G+Y+j97P5GPSELFChA+cHKixJi8NNlYwFfTAQQAlU='; style-src 'sha256-JH7E/q61Yl3+Hkgs3NM/+f3oNrVjyypI5SXy204GqcM='; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-o/AXrIzI4DfoorqPqngALwwYsuqrtQiYwCcON0FbtXo='; style-src 'sha256-JH7E/q61Yl3+Hkgs3NM/+f3oNrVjyypI5SXy204GqcM='; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#2f7d6d">
@@ -8023,19 +8023,24 @@ function scanBarcode() {
 return { expandUpcE, validBarcode, canonicalBarcode, scanBarcode };
 })();
 const __m_fooddb = (() => {
-// Moroccan food database, served from the app's GitHub repo (data/ folder).
+// Moroccan food database. Two ways to get it:
+// - Android app: built into the app (assets/data), so it never contacts any server for it.
+// - Downloadable file / GitHub Pages: served from the app's repo (data/ folder).
 // The whole list downloads once (about 1–2 MB) and is then searched offline.
 // Product photos load only when shown, then stay cached on the phone.
 // Nothing about you is sent: GitHub only sees that the public list or a photo was requested.
 const { cacheGet, cacheSet } = __m_db;
 
-const RAW = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/';
-const LATEST = 'https://api.github.com/repos/jebyou095-eng/S-tier/commits/HEAD';
+const RAW = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/'; // build_apk strips this
+const LATEST = 'https://api.github.com/repos/jebyou095-eng/S-tier/commits/HEAD'; // build_apk strips this
 const HOSTED = !!globalThis.POCKET_STATS_HOSTED;
+/** Data built into the app (Android): read from the app's own files, no network at all. */
+const LOCAL = !!globalThis.POCKET_STATS_LOCAL_DATA;
+const LOCAL_REF = `local-${globalThis.POCKET_STATS_DATA_VERSION || '0'}`;
 const MAX_AGE = 24 * 3600 * 1000; // check for a new version once a day (cheap: one tiny request)
 // Files are read by exact commit id: GitHub's CDN can serve a stale copy of the 'HEAD' alias for a long time.
 let ref = 'HEAD';
-const base = () => (HOSTED ? 'data/' : `${RAW}${ref}/data/`); // web-link version ships the list next to the page
+const base = () => (HOSTED || LOCAL ? 'data/' : `${RAW}${ref}/data/`); // web link and Android app ship the data with the page
 
 /** The repo's current commit id, or null. */
 async function latestCommit() {
@@ -8071,7 +8076,7 @@ function adopt(json, fetched) {
     serving: +x.s > 0 ? +x.s : 100,
     servingLabel: String(x.sl || '100 g').slice(0, 30),
     code: String(x.code || ''),
-    img: typeof x.img === 'string' && /^img\/[\w/-]+\.jpg$/.test(x.img) ? x.img : '',
+    img: typeof x.img === 'string' && /^img\/[\w/-]+\.(jpg|webp)$/.test(x.img) ? x.img : '',
     emoji: typeof x.e === 'string' ? x.e.slice(0, 4) : '',
     where: String(x.w || ''), cat: String(x.cat || ''), qty: String(x.q || ''), nutri: x.ns || '',
     ing: Array.isArray(x.ing) ? x.ing.filter((i) => Array.isArray(i) && typeof i[0] === 'string' && +i[1] > 0).map((i) => [i[0], +i[1]]) : null,
@@ -8090,6 +8095,17 @@ function loadFoodDb({ force = false, allowNetwork = true } = {}) {
   loading = (async () => {
     let cached = null;
     try { cached = await cacheGet('fooddb'); } catch { /* storage unavailable */ }
+    if (LOCAL) {
+      // Built into the app: reuse the parsed copy unless this is a new app version.
+      if (cached?.ref === LOCAL_REF) { if (!foods.length) adopt(cached.json, cached.fetched); return foods.length; }
+      const r = await fetch('data/foods-morocco.json', FETCH);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const json = await r.json();
+      ref = LOCAL_REF;
+      adopt(json, Date.now());
+      try { await cacheSet('fooddb', { json, fetched: Date.now(), ref: LOCAL_REF }); } catch { /* ignore */ }
+      return foods.length;
+    }
     if (cached?.ref) ref = cached.ref;
     if (cached && !foods.length) adopt(cached.json, cached.fetched);
     const stale = !cached || Date.now() - cached.fetched > MAX_AGE;
@@ -8218,7 +8234,7 @@ function foodThumb(food, { size = 'sm', photos = true, userPhoto = '' } = {}) {
   return box;
 }
 
-return { loadFoodDb, foodDb, repoFile, ingredientInfo, foodDbMeta, findByCode, onFoodDb, photosAvailable, labelIngredients, foodThumb };
+return { LOCAL, loadFoodDb, foodDb, repoFile, ingredientInfo, foodDbMeta, findByCode, onFoodDb, photosAvailable, labelIngredients, foodThumb };
 })();
 const __m_recognize = (() => {
 // Food recognition from a photo, using Claude's vision.
@@ -8651,7 +8667,7 @@ const { barChart } = __m_charts;
 const { searchLocal } = __m_foods;
 const { ACTIVITY, GOALS, targets, scale, sum, lookupBarcode, searchOnline, agreement, buildPlan, suggestions } = __m_nutrition;
 const { scanBarcode, canonicalBarcode } = __m_scanner;
-const { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients } = __m_fooddb;
+const { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients, LOCAL: DATA_BUILT_IN } = __m_fooddb;
 const { recognizeFood, recognitionMode, preparePhoto, RecognitionError } = __m_recognize;
 const { prepareScanner, fingerprint, learn, match, confidence, plateCoverage, addSize, estimateGrams, medianOf } = __m_foodscan;
 
@@ -8686,7 +8702,7 @@ function cleanFood(x) {
   return {
     id: str(x.id || uid(), 60), name: str(x.name, 80), brand: str(x.brand, 40), source: str(x.source, 30) || 'You',
     code: str(x.code, 14).replace(/\D/g, ''), n, serving: num(x.serving, 1, 5000) ?? 100, servingLabel: str(x.servingLabel, 30) || '100 g',
-    img: /^img\/[\w/-]+\.jpg$/.test(x.img || '') ? x.img : '', emoji: str(x.emoji, 4),
+    img: /^img\/[\w/-]+\.(jpg|webp)$/.test(x.img || '') ? x.img : '', emoji: str(x.emoji, 4),
   };
 }
 
@@ -9082,7 +9098,7 @@ function browseDialog(meal) {
     const off = onFoodDb(draw);
     const close = (v) => { off(); done(v); };
     if (!foodDb().length) {
-      status.textContent = 'Downloading the Moroccan food list from GitHub…';
+      status.textContent = 'Loading the Moroccan food list…';
       loadFoodDb({ force: true }).then(draw).catch(() => {
         status.textContent = "Couldn't download the food list. Check your connection and try again.";
       });
@@ -9843,18 +9859,18 @@ function foodSettingsCard(c) {
     }, 'Remove API key') : null,
     h('h3', {}, 'Moroccan food database'),
     h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Use the Moroccan food list', h('span', { class: 'muted small block' }, 'Supermarket products plus souk, street and home foods. Downloaded from this app’s GitHub repo about once a week; it holds no personal data and nothing about you is sent.')),
+      h('span', { class: 'grow' }, 'Use the Moroccan food list', h('span', { class: 'muted small block' }, DATA_BUILT_IN ? 'Supermarket products plus souk, street and home foods. Built into the app: works offline and contacts no server.' : 'Supermarket products plus souk, street and home foods. Downloaded from the app’s data server about once a day when it changed; it holds no personal data and nothing about you is sent.')),
       h('input', { type: 'checkbox', role: 'switch', checked: F().moroccoDb, onchange: async (e) => { F().moroccoDb = e.target.checked; await ctx.commit(); if (e.target.checked) loadFoodDb().catch(() => {}); } })),
     photosAvailable() ? h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Show product photos', h('span', { class: 'muted small block' }, 'Each photo downloads from GitHub the first time you see it, then stays on your phone.')),
+      h('span', { class: 'grow' }, 'Show product photos', h('span', { class: 'muted small block' }, DATA_BUILT_IN ? 'Built into the app.' : 'Each photo downloads the first time you see it, then stays on your phone.')),
       h('input', { type: 'checkbox', role: 'switch', checked: F().photos, onchange: async (e) => { F().photos = e.target.checked; await ctx.commit(); } })) : null,
     F().moroccoDb ? h('p', { class: 'muted small' }, foodDb().length
-      ? `${foodDb().length.toLocaleString()} foods · list from ${foodDbMeta().version || '?'} · checked ${new Date(foodDbMeta().fetched).toLocaleDateString()}`
+      ? `${foodDb().length.toLocaleString()} foods · list from ${foodDbMeta().version || '?'}${DATA_BUILT_IN ? ' · built into this version of the app' : ` · checked ${new Date(foodDbMeta().fetched).toLocaleDateString()}`}`
       : 'Not downloaded yet.') : null,
-    F().moroccoDb ? h('button', {
+    F().moroccoDb && !DATA_BUILT_IN ? h('button', {
       class: 'btn ghost', onclick: async () => {
         toast('Updating food list…');
-        try { const n = await loadFoodDb({ force: true }); toast(`Food list updated: ${n.toLocaleString()} foods`); ctx.render(); } catch { toast("Couldn't reach GitHub. Try again later."); }
+        try { const n = await loadFoodDb({ force: true }); toast(`Food list updated: ${n.toLocaleString()} foods`); ctx.render(); } catch { toast("Couldn't reach the data server. Try again later."); }
       },
     }, 'Update food list now') : null,
     h('p', { class: 'muted small' }, `${F().saved.length} saved foods · ${F().log.length} diary entries`),
@@ -11205,7 +11221,7 @@ const { viewFood, freshFood, normalizeFood, foodSettingsCard, resetFoodView } = 
 const { viewGym, freshGym, normalizeGym, resetGymView } = __m_gym;
 const { loadFoodDb } = __m_fooddb;
 
-/** Load the Moroccan food list (from the phone's cache, refreshing from GitHub weekly). */
+/** Load the Moroccan food list (built into the Android app, or from the data server). */
 function warmFoodDb() {
   if (state?.food?.moroccoDb === false) return;
   loadFoodDb().then(() => { if (view === 'settings') render(); }).catch(() => { /* offline: try again next launch */ });
@@ -11833,7 +11849,7 @@ function viewSettings() {
         h('li', {}, 'Barcode scanning happens on the phone. Camera images are never saved or sent.'),
         h('li', {}, 'Works fully offline once opened.'),
         h('li', {}, 'With a passcode, data is encrypted at rest and hidden in the app switcher.'))),
-    h('p', { class: 'muted small center' }, 'Pocket Stats v1.6'));
+    h('p', { class: 'muted small center' }, 'Pocket Stats v1.7'));
 }
 
 // Context handed to the Food tab so it can read and save shared state.

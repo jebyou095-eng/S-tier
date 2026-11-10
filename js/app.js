@@ -8,7 +8,7 @@ import { viewFood, freshFood, normalizeFood, foodSettingsCard, resetFoodView } f
 import { viewGym, freshGym, normalizeGym, resetGymView } from './gym.js';
 import { loadFoodDb } from './fooddb.js';
 
-/** Load the Moroccan food list (from the phone's cache, refreshing from GitHub weekly). */
+/** Load the Moroccan food list (built into the Android app, or from the data server). */
 function warmFoodDb() {
   if (state?.food?.moroccoDb === false) return;
   loadFoodDb().then(() => { if (view === 'settings') render(); }).catch(() => { /* offline: try again next launch */ });
@@ -636,7 +636,7 @@ function viewSettings() {
         h('li', {}, 'Barcode scanning happens on the phone. Camera images are never saved or sent.'),
         h('li', {}, 'Works fully offline once opened.'),
         h('li', {}, 'With a passcode, data is encrypted at rest and hidden in the app switcher.'))),
-    h('p', { class: 'muted small center' }, 'Pocket Stats v1.6'));
+    h('p', { class: 'muted small center' }, 'Pocket Stats v1.7'));
 }
 
 // Context handed to the Food tab so it can read and save shared state.

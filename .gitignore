@@ -11,3 +11,10 @@ __pycache__/
 
 # Copy of the food list published with the web link (source: data/)
 dist/data/
+
+# Converted photo cache for the Android build
+android/.cache/
+
+# The Android app is shared directly (not via this repo); build it with android/build.sh
+dist/*.apk
+dist/*.idsig

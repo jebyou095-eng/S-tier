@@ -53,14 +53,52 @@ def convert(name, src):
     return f'const {mod_var(name)} = (() => {{\n{body}\nreturn {{ {", ".join(exports)} }};\n}})();\n'
 
 
-def bundle(hosted):
+def bundle(hosted, local_data=None):
     order = []
     load(ENTRY.removesuffix('.js'), set(), order)
     code = '"use strict";\nglobalThis.POCKET_STATS_BUNDLED = true;\n'
     if hosted:
         code += 'globalThis.POCKET_STATS_HOSTED = true;\n'
+    if local_data:
+        code += f'globalThis.POCKET_STATS_LOCAL_DATA = true;\nglobalThis.POCKET_STATS_DATA_VERSION = "{local_data}";\n'
     code += ''.join(convert(n, s) for n, s in order)
+    if local_data:
+        # The Android app reads its data from its own files: remove the repo address entirely.
+        code = re.sub(r"'https://(raw\.githubusercontent\.com|api\.github\.com)/[^']*'", "''", code)
     return code
+
+
+def bundle_data(dest):
+    """Copy the food list, ingredient lists, scanner model and photos (as small WebP) into the APK."""
+    import json as _json
+    import shutil
+    from PIL import Image
+    data = ROOT / 'data'
+    if dest.exists():
+        shutil.rmtree(dest)
+    (dest / 'img').mkdir(parents=True)
+    shutil.copytree(data / 'ing', dest / 'ing')
+    shutil.copytree(data / 'ml' / 'mobilenet_v2_0.35_224', dest / 'ml' / 'mobilenet_v2_0.35_224')
+    db = _json.loads((data / 'foods-morocco.json').read_text())
+    cache = ROOT / 'android' / '.cache' / 'img'
+    for f in db['foods']:
+        img = f.get('img')
+        if not img:
+            continue
+        rel = Path(img).with_suffix('.webp')
+        cached = cache / rel.relative_to('img')
+        if not cached.exists() or cached.stat().st_mtime < (data / img).stat().st_mtime:
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            im = Image.open(data / img).convert('RGB')
+            im.thumbnail((128, 128))
+            im.save(cached, 'WEBP', quality=65, method=6)
+        out = dest / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(cached, out)
+        f['img'] = str(rel)
+    text = _json.dumps(db, ensure_ascii=False, separators=(',', ':'))
+    (dest / 'foods-morocco.json').write_text(text)
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
 def data_uri(path, mime):
@@ -85,25 +123,12 @@ def theme_css(css):
     return css.replace(m.group(0), replacement)
 
 
-def main():
-    css = theme_css((ROOT / 'css' / 'styles.css').read_text())
-    zxing = (JS / 'vendor' / 'zxing.min.js').read_text()
-    claude_sdk = (JS / 'vendor' / 'anthropic-sdk.min.js').read_text()  # official Anthropic SDK (browser bundle)
-    tfjs = (JS / 'vendor' / 'tf.min.js').read_text()  # TensorFlow.js for on-device Scan & teach
-    icon = data_uri(ROOT / 'icons' / 'apple-touch-icon.png', 'image/png')
-    favicon = data_uri(ROOT / 'icons' / 'icon.svg', 'image/svg+xml')
-    body = ('<div id="app" aria-live="polite"></div>\n<nav id="tabs" class="tabs" hidden></nav>\n'
-            '<div id="toast" class="toast" role="status" hidden></div>\n')
-    out = ROOT / 'dist'
-    out.mkdir(exist_ok=True)
-
-    # 1) Downloadable offline app
-    app = bundle(hosted=False)
+def page(css, zxing, claude_sdk, tfjs, app, favicon, icon, body, connect):
     csp = ("default-src 'none'; "
            f"script-src {sha(zxing)} {sha(claude_sdk)} {sha(tfjs)} {sha(app)}; style-src {sha(css)}; "
            "img-src data: blob:; media-src blob: mediastream:; "
-           "connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'")
-    full = f'''<!doctype html>
+           f"connect-src {connect}; base-uri 'none'; form-action 'none'")
+    return f'''<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -126,10 +151,37 @@ def main():
 </body>
 </html>
 '''
+
+
+def main():
+    css = theme_css((ROOT / 'css' / 'styles.css').read_text())
+    zxing = (JS / 'vendor' / 'zxing.min.js').read_text()
+    claude_sdk = (JS / 'vendor' / 'anthropic-sdk.min.js').read_text()  # official Anthropic SDK (browser bundle)
+    tfjs = (JS / 'vendor' / 'tf.min.js').read_text()  # TensorFlow.js for on-device Scan & teach
+    icon = data_uri(ROOT / 'icons' / 'apple-touch-icon.png', 'image/png')
+    favicon = data_uri(ROOT / 'icons' / 'icon.svg', 'image/svg+xml')
+    body = ('<div id="app" aria-live="polite"></div>\n<nav id="tabs" class="tabs" hidden></nav>\n'
+            '<div id="toast" class="toast" role="status" hidden></div>\n')
+    out = ROOT / 'dist'
+    out.mkdir(exist_ok=True)
+
+    # 1) Downloadable offline app (data from the repo's data server)
+    full = page(css, zxing, claude_sdk, tfjs, bundle(hosted=False), favicon, icon, body,
+                'https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com')
     (out / 'PocketStats.html').write_text(full)
+
+    # 1b) Android app: all data built in, no repo address, no GitHub at all
     assets = ROOT / 'android' / 'app' / 'assets'
     assets.mkdir(parents=True, exist_ok=True)
-    (assets / 'index.html').write_text(full)
+    version = bundle_data(assets / 'data')
+    apk_page = page(css, zxing, claude_sdk, tfjs, bundle(hosted=False, local_data=version), favicon, icon, body,
+                    "'self' https://world.openfoodfacts.org https://api.nal.usda.gov https://api.anthropic.com")
+    (assets / 'index.html').write_text(apk_page)
+    leaks = [str(f.relative_to(assets)) for f in assets.rglob('*') if f.is_file() and b'jebyou' in f.read_bytes()]
+    if leaks:
+        raise SystemExit(f'Repo owner name found in Android assets: {leaks[:5]}')
+    size = sum(f.stat().st_size for f in assets.rglob('*') if f.is_file())
+    print(f'android assets: {size / 1e6:.1f} MB (data version {version}), no repo address inside')
 
     # 2) claude.ai web-link version (the host supplies the document skeleton and CSP)
     web = f'''<title>Pocket Stats</title>

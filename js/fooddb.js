@@ -1,16 +1,21 @@
-// Moroccan food database, served from the app's GitHub repo (data/ folder).
+// Moroccan food database. Two ways to get it:
+// - Android app: built into the app (assets/data), so it never contacts any server for it.
+// - Downloadable file / GitHub Pages: served from the app's repo (data/ folder).
 // The whole list downloads once (about 1–2 MB) and is then searched offline.
 // Product photos load only when shown, then stay cached on the phone.
 // Nothing about you is sent: GitHub only sees that the public list or a photo was requested.
 import { cacheGet, cacheSet } from './db.js';
 
-const RAW = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/';
-const LATEST = 'https://api.github.com/repos/jebyou095-eng/S-tier/commits/HEAD';
+const RAW = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/'; // build_apk strips this
+const LATEST = 'https://api.github.com/repos/jebyou095-eng/S-tier/commits/HEAD'; // build_apk strips this
 const HOSTED = !!globalThis.POCKET_STATS_HOSTED;
+/** Data built into the app (Android): read from the app's own files, no network at all. */
+export const LOCAL = !!globalThis.POCKET_STATS_LOCAL_DATA;
+const LOCAL_REF = `local-${globalThis.POCKET_STATS_DATA_VERSION || '0'}`;
 const MAX_AGE = 24 * 3600 * 1000; // check for a new version once a day (cheap: one tiny request)
 // Files are read by exact commit id: GitHub's CDN can serve a stale copy of the 'HEAD' alias for a long time.
 let ref = 'HEAD';
-const base = () => (HOSTED ? 'data/' : `${RAW}${ref}/data/`); // web-link version ships the list next to the page
+const base = () => (HOSTED || LOCAL ? 'data/' : `${RAW}${ref}/data/`); // web link and Android app ship the data with the page
 
 /** The repo's current commit id, or null. */
 async function latestCommit() {
@@ -46,7 +51,7 @@ function adopt(json, fetched) {
     serving: +x.s > 0 ? +x.s : 100,
     servingLabel: String(x.sl || '100 g').slice(0, 30),
     code: String(x.code || ''),
-    img: typeof x.img === 'string' && /^img\/[\w/-]+\.jpg$/.test(x.img) ? x.img : '',
+    img: typeof x.img === 'string' && /^img\/[\w/-]+\.(jpg|webp)$/.test(x.img) ? x.img : '',
     emoji: typeof x.e === 'string' ? x.e.slice(0, 4) : '',
     where: String(x.w || ''), cat: String(x.cat || ''), qty: String(x.q || ''), nutri: x.ns || '',
     ing: Array.isArray(x.ing) ? x.ing.filter((i) => Array.isArray(i) && typeof i[0] === 'string' && +i[1] > 0).map((i) => [i[0], +i[1]]) : null,
@@ -65,6 +70,17 @@ export function loadFoodDb({ force = false, allowNetwork = true } = {}) {
   loading = (async () => {
     let cached = null;
     try { cached = await cacheGet('fooddb'); } catch { /* storage unavailable */ }
+    if (LOCAL) {
+      // Built into the app: reuse the parsed copy unless this is a new app version.
+      if (cached?.ref === LOCAL_REF) { if (!foods.length) adopt(cached.json, cached.fetched); return foods.length; }
+      const r = await fetch('data/foods-morocco.json', FETCH);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const json = await r.json();
+      ref = LOCAL_REF;
+      adopt(json, Date.now());
+      try { await cacheSet('fooddb', { json, fetched: Date.now(), ref: LOCAL_REF }); } catch { /* ignore */ }
+      return foods.length;
+    }
     if (cached?.ref) ref = cached.ref;
     if (cached && !foods.length) adopt(cached.json, cached.fetched);
     const stale = !cached || Date.now() - cached.fetched > MAX_AGE;

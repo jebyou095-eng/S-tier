@@ -7,7 +7,7 @@ import {
   ACTIVITY, GOALS, targets, scale, sum, lookupBarcode, searchOnline, agreement, buildPlan, suggestions,
 } from './nutrition.js';
 import { scanBarcode, canonicalBarcode } from './scanner.js';
-import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients } from './fooddb.js';
+import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients, LOCAL as DATA_BUILT_IN } from './fooddb.js';
 import { recognizeFood, recognitionMode, preparePhoto, RecognitionError } from './recognize.js';
 import { prepareScanner, fingerprint, learn, match, confidence, plateCoverage, addSize, estimateGrams, medianOf } from './foodscan.js';
 
@@ -42,7 +42,7 @@ function cleanFood(x) {
   return {
     id: str(x.id || uid(), 60), name: str(x.name, 80), brand: str(x.brand, 40), source: str(x.source, 30) || 'You',
     code: str(x.code, 14).replace(/\D/g, ''), n, serving: num(x.serving, 1, 5000) ?? 100, servingLabel: str(x.servingLabel, 30) || '100 g',
-    img: /^img\/[\w/-]+\.jpg$/.test(x.img || '') ? x.img : '', emoji: str(x.emoji, 4),
+    img: /^img\/[\w/-]+\.(jpg|webp)$/.test(x.img || '') ? x.img : '', emoji: str(x.emoji, 4),
   };
 }
 
@@ -438,7 +438,7 @@ function browseDialog(meal) {
     const off = onFoodDb(draw);
     const close = (v) => { off(); done(v); };
     if (!foodDb().length) {
-      status.textContent = 'Downloading the Moroccan food list from GitHub…';
+      status.textContent = 'Loading the Moroccan food list…';
       loadFoodDb({ force: true }).then(draw).catch(() => {
         status.textContent = "Couldn't download the food list. Check your connection and try again.";
       });
@@ -1199,18 +1199,18 @@ export function foodSettingsCard(c) {
     }, 'Remove API key') : null,
     h('h3', {}, 'Moroccan food database'),
     h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Use the Moroccan food list', h('span', { class: 'muted small block' }, 'Supermarket products plus souk, street and home foods. Downloaded from this app’s GitHub repo about once a week; it holds no personal data and nothing about you is sent.')),
+      h('span', { class: 'grow' }, 'Use the Moroccan food list', h('span', { class: 'muted small block' }, DATA_BUILT_IN ? 'Supermarket products plus souk, street and home foods. Built into the app: works offline and contacts no server.' : 'Supermarket products plus souk, street and home foods. Downloaded from the app’s data server about once a day when it changed; it holds no personal data and nothing about you is sent.')),
       h('input', { type: 'checkbox', role: 'switch', checked: F().moroccoDb, onchange: async (e) => { F().moroccoDb = e.target.checked; await ctx.commit(); if (e.target.checked) loadFoodDb().catch(() => {}); } })),
     photosAvailable() ? h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Show product photos', h('span', { class: 'muted small block' }, 'Each photo downloads from GitHub the first time you see it, then stays on your phone.')),
+      h('span', { class: 'grow' }, 'Show product photos', h('span', { class: 'muted small block' }, DATA_BUILT_IN ? 'Built into the app.' : 'Each photo downloads the first time you see it, then stays on your phone.')),
       h('input', { type: 'checkbox', role: 'switch', checked: F().photos, onchange: async (e) => { F().photos = e.target.checked; await ctx.commit(); } })) : null,
     F().moroccoDb ? h('p', { class: 'muted small' }, foodDb().length
-      ? `${foodDb().length.toLocaleString()} foods · list from ${foodDbMeta().version || '?'} · checked ${new Date(foodDbMeta().fetched).toLocaleDateString()}`
+      ? `${foodDb().length.toLocaleString()} foods · list from ${foodDbMeta().version || '?'}${DATA_BUILT_IN ? ' · built into this version of the app' : ` · checked ${new Date(foodDbMeta().fetched).toLocaleDateString()}`}`
       : 'Not downloaded yet.') : null,
-    F().moroccoDb ? h('button', {
+    F().moroccoDb && !DATA_BUILT_IN ? h('button', {
       class: 'btn ghost', onclick: async () => {
         toast('Updating food list…');
-        try { const n = await loadFoodDb({ force: true }); toast(`Food list updated: ${n.toLocaleString()} foods`); ctx.render(); } catch { toast("Couldn't reach GitHub. Try again later."); }
+        try { const n = await loadFoodDb({ force: true }); toast(`Food list updated: ${n.toLocaleString()} foods`); ctx.render(); } catch { toast("Couldn't reach the data server. Try again later."); }
       },
     }, 'Update food list now') : null,
     h('p', { class: 'muted small' }, `${F().saved.length} saved foods · ${F().log.length} diary entries`),

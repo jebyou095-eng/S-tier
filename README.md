@@ -17,7 +17,7 @@ It also has a **gym section** (exercise library with muscle maps, animated form 
 
 ## Put it on your phone
 
-**Android app: `dist/PocketStats.apk`.** Download it on your phone, open it, and allow "install unknown apps" for your browser or Files app when Android asks. Data stays in the app's private storage, is excluded from Google cloud backup, and the screen is hidden from screenshots and the app switcher while a passcode is set. Build it yourself with `PS_KS_PASS=… ./android/build.sh` (no Gradle or Android Studio needed; see the script header). Keep your signing key private and out of this public repo.
+**Android app** (build with `android/build.sh`; the APK is shared directly, not stored here). Download it on your phone, open it, and allow "install unknown apps" for your browser or Files app when Android asks. The food list, ingredient lists, scanner model and product photos are built into the APK, so it works offline and contacts no server for them (no repository address is inside it). Data stays in the app's private storage, is excluded from Google cloud backup, and the screen is hidden from screenshots and the app switcher while a passcode is set. Build it yourself with `PS_KS_PASS=… ./android/build.sh` (no Gradle or Android Studio needed; see the script header). Keep your signing key private and out of this public repo.
 
 **Quickest: download one file.** `dist/PocketStats.html` is the whole app in a single file (about 550 KB) with every feature. Save it on your phone and open it in your browser (Android: Chrome or Firefox). Rebuild it with `python3 tools/build.py`.
 

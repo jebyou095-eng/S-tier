@@ -88,7 +88,12 @@ public class MainActivity extends Activity {
                 headers.put("Cache-Control", "no-store");
                 try {
                     InputStream in = getAssets().open(path.substring(1));
-                    String mime = path.endsWith(".html") ? "text/html" : "application/octet-stream";
+                    String mime = path.endsWith(".html") ? "text/html"
+                            : path.endsWith(".json") ? "application/json"
+                            : path.endsWith(".webp") ? "image/webp"
+                            : path.endsWith(".jpg") ? "image/jpeg"
+                            : path.endsWith(".png") ? "image/png"
+                            : "application/octet-stream";
                     return new WebResourceResponse(mime, "utf-8", 200, "OK", headers, in);
                 } catch (IOException e) {
                     // Unknown local path: answer 404 here so nothing goes out to the network.
