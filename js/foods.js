@@ -110,22 +110,30 @@ export const FOODS = RAW.map(([id, name, kcal, p, c, f, fib, serving, servingLab
 export const FOOD_BY_ID = Object.fromEntries(FOODS.map((x) => [x.id, x]));
 
 /** Simple ranked substring search over the built-in table. */
-export function searchLocal(q, extra = []) {
+export function searchLocal(q, ...lists) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  // The downloaded list comes first in `extra`, so when a built-in food has the same name
-  // (e.g. Harira), the richer downloaded version (recipe, photo, Darija name) wins.
+  // One pass, no intermediate copies of the ~9,000-item list. The downloaded list comes first
+  // in `extra`, so when a built-in food has the same name (e.g. Harira) the richer downloaded
+  // version (recipe, photo, Darija name) wins: pass lists best-first.
   const seen = new Set();
-  return [...extra, ...FOODS]
-    .filter((f) => { const k = f.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
-    .map((f) => {
-      const hay = f.hay || `${f.name} ${f.brand || ''} ${f.alt || ''}`.toLowerCase();
-      if (!words.every((w) => hay.includes(w))) return null;
-      return { f, score: (hay.startsWith(words[0]) ? 0 : 1) + hay.length / 100 };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.score - b.score)
-    .map((x) => x.f);
+  const hits = [];
+  const scan = (list) => {
+    for (const f of list) {
+      const hay = f.hay || (f.hay = `${f.name} ${f.brand || ''} ${f.alt || ''}`.toLowerCase());
+      let ok = true;
+      for (const w of words) if (!hay.includes(w)) { ok = false; break; }
+      if (!ok) continue;
+      const key = f.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push({ f, score: (hay.startsWith(words[0]) ? 0 : 1) + hay.length / 100 });
+    }
+  };
+  for (const list of lists) scan(list);
+  scan(FOODS);
+  hits.sort((a, b) => a.score - b.score);
+  return hits.map((x) => x.f);
 }
 
 // Sample-day templates. Items marked p:true are scaled to hit protein; the rest scale to hit calories.

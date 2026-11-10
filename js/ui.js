@@ -16,6 +16,21 @@ export function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+/**
+ * Run a library that a bundled build ships as inert text (<script type="text/plain" id=…>).
+ * The browser skips parsing it at startup; it runs only when a feature needs it. The page's
+ * security policy still allows exactly that code (by hash) and nothing else. Returns true if run.
+ */
+export function runBundledLib(id) {
+  const el = document.getElementById(id);
+  if (!el) return false;
+  const s = document.createElement('script');
+  s.textContent = el.textContent;
+  document.head.append(s);
+  el.remove();
+  return true;
+}
+
 export const uid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
 
 export function dayLabel(k) {

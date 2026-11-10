@@ -50,7 +50,7 @@ function adopt(json, fetched) {
     emoji: typeof x.e === 'string' ? x.e.slice(0, 4) : '',
     where: String(x.w || ''), cat: String(x.cat || ''), qty: String(x.q || ''), nutri: x.ns || '',
     ing: Array.isArray(x.ing) ? x.ing.filter((i) => Array.isArray(i) && typeof i[0] === 'string' && +i[1] > 0).map((i) => [i[0], +i[1]]) : null,
-    labelIngredients: typeof x.it === 'string' ? x.it.slice(0, 500) : '',
+    hasLabelIngredients: x.hi === 1,
   }));
   ingredientTable = json.ingredients && typeof json.ingredients === 'object' ? json.ingredients : {};
   for (const f of foods) f.hay = `${f.name} ${f.brand} ${f.alt}`.toLowerCase();
@@ -106,6 +106,27 @@ export const foodDbMeta = () => meta;
 export const findByCode = (code) => byCode.get(code) || byCode.get(code.replace(/^0+/, '')) || null;
 export const onFoodDb = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 export const photosAvailable = () => !HOSTED;
+
+// ---------- label ingredients (loaded on demand, ~100 small files) ----------
+const shardCache = new Map();
+/** Ingredient list printed on a packaged product's label, or '' if unknown. */
+export async function labelIngredients(food) {
+  if (!food.hasLabelIngredients || !food.code) return '';
+  const key = food.code.slice(-2);
+  if (!shardCache.has(key)) {
+    shardCache.set(key, (async () => {
+      const cacheKey = `ing:${ref}:${key}`;
+      try { const c = await cacheGet(cacheKey); if (c) return c; } catch { /* ignore */ }
+      const r = await fetch(`${base()}ing/${key}.json`, FETCH);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      try { await cacheSet(cacheKey, data); } catch { /* ignore */ }
+      return data;
+    })().catch((err) => { shardCache.delete(key); throw err; }));
+  }
+  const data = await shardCache.get(key);
+  return typeof data?.[food.code] === 'string' ? data[food.code].slice(0, 600) : '';
+}
 
 // ---------- photos ----------
 const urls = new Map();

@@ -169,6 +169,23 @@ def main():
                         done += 1
         print(f'Thumbnails saved: {done}', file=sys.stderr)
 
+    # Label ingredient lists are a third of the data but only read when a product is opened,
+    # so they go into 100 small files (by the barcode's last two digits) loaded on demand.
+    ing_dir = ROOT / 'data' / 'ing'
+    if ing_dir.exists():
+        for old in ing_dir.glob('*.json'):
+            old.unlink()
+    ing_dir.mkdir(parents=True, exist_ok=True)
+    shards = {}
+    for p in products.values():
+        text = p.pop('it', '')
+        if text:
+            shards.setdefault(p['code'][-2:], {})[p['code']] = text.replace('\ufffd', '')
+            p['hi'] = 1
+    for key, data in shards.items():
+        (ing_dir / f'{key}.json').write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')))
+    print(f'Ingredient lists: {sum(len(v) for v in shards.values())} in {len(shards)} files', file=sys.stderr)
+
     foods = list(market_items()) + sorted(products.values(), key=lambda x: (x['cat'], x['b'].lower(), x['n'].lower()))
     used = sorted({i for f in foods for i, _ in f.get('ing', [])})
     out = {

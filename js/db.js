@@ -102,6 +102,8 @@ export async function verify(pass) {
 }
 
 export async function save(state) {
+  // Your food photos are stored as separate records (savePhoto), so a save doesn't re-encrypt them all.
+  if (state?.food?.myPhotos && Object.keys(state.food.myPhotos).length) state = { ...state, food: { ...state.food, myPhotos: {} } };
   if (key) {
     const { iv, ct } = await encryptObj(key, state);
     await idbSet(VAULT, { v: 1, locked: true, salt, iter: iterations, iv, ct });
@@ -115,11 +117,42 @@ export async function setPasscode(pass, state) {
   iterations = ITERATIONS;
   key = await deriveKey(pass, salt, iterations);
   await save(state);
+  await savePhotos(state?.food?.myPhotos); // re-encrypt photos with the new key
 }
 
 export async function removePasscode(state) {
   key = null; salt = null;
   await save(state);
+  await savePhotos(state?.food?.myPhotos);
+}
+
+// ---------- your food photos: one record each, encrypted like the rest ----------
+export async function savePhoto(id, dataUrl) {
+  if (key) {
+    const { iv, ct } = await encryptObj(key, dataUrl);
+    await idbSet(`photo:${id}`, { locked: true, iv, ct });
+  } else {
+    await idbSet(`photo:${id}`, { locked: false, data: dataUrl });
+  }
+}
+
+export async function savePhotos(map) {
+  for (const [id, url] of Object.entries(map || {})) await savePhoto(id, url);
+}
+
+/** All your food photos ({food id: data URL}); needs the passcode key when locked. */
+export async function loadPhotos() {
+  const keys = await tx('readonly', (s) => s.getAllKeys());
+  const out = {};
+  for (const k of keys) {
+    if (typeof k !== 'string' || !k.startsWith('photo:')) continue;
+    const r = await idbGet(k);
+    try {
+      const url = r?.locked ? (key ? await decryptObj(key, r.iv, r.ct) : null) : r?.data;
+      if (typeof url === 'string' && url.startsWith('data:image/jpeg;base64,')) out[k.slice(6)] = url;
+    } catch { /* skip a damaged record */ }
+  }
+  return out;
 }
 
 export const hasPasscode = () => !!key;

@@ -6,12 +6,14 @@
 //   (stored on the phone, encrypted if you set a passcode).
 // - claude.ai web link: sent through your Claude account (the page asks first).
 // Only the photo and the food list below are sent: never your diary or body stats.
+import { runBundledLib } from './ui.js';
+
 const MODEL = 'claude-opus-5-5';
 const SDK_SRC = 'js/vendor/anthropic-sdk.min.js';
 
 let sdkLoad = null;
 function loadSdk() {
-  if (globalThis.Anthropic) return Promise.resolve(globalThis.Anthropic); // bundled builds include it
+  if (globalThis.Anthropic || runBundledLib('lib-claude')) return Promise.resolve(globalThis.Anthropic); // bundled builds carry it inline
   sdkLoad ??= new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = SDK_SRC;

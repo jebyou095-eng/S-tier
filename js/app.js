@@ -514,6 +514,7 @@ function importBackup() {
       const next = normalize(data);
       if (!await confirmDialog('Replace current data?', `The backup has ${next.trackers.length} trackers and ${next.entries.length} entries. Everything currently in the app will be replaced.`, 'Replace', true)) return;
       state = next;
+      await attachPhotos();
       await commit();
       toast('Backup restored');
     } catch {
@@ -635,12 +636,25 @@ function viewSettings() {
         h('li', {}, 'Barcode scanning happens on the phone. Camera images are never saved or sent.'),
         h('li', {}, 'Works fully offline once opened.'),
         h('li', {}, 'With a passcode, data is encrypted at rest and hidden in the app switcher.'))),
-    h('p', { class: 'muted small center' }, 'Pocket Stats v1.2'));
+    h('p', { class: 'muted small center' }, 'Pocket Stats v1.3'));
 }
 
 // Context handed to the Food tab so it can read and save shared state.
+/**
+ * Photos are stored outside the main record. Load them into memory, and move any that
+ * are still inside it (from an older version or a restored backup) to their own records.
+ */
+async function attachPhotos() {
+  const inline = state.food.myPhotos || {};
+  const hasInline = Object.keys(inline).length > 0;
+  if (hasInline) await vault.savePhotos(inline);
+  state.food.myPhotos = { ...inline, ...(await vault.loadPhotos()) };
+  if (hasInline) await vault.save(state);
+}
+
 const foodCtx = {
   get state() { return state; },
+  savePhoto: (id, url) => vault.savePhoto(id, url),
   commit: () => commit(),
   render: () => render(),
   save: () => vault.save(state).catch((err) => toast(`Couldn't save: ${err.message}`)),
@@ -668,6 +682,7 @@ function showLock() {
       btn.disabled = true; btn.textContent = 'Unlocking…'; err.hidden = true;
       try {
         state = normalize(await vault.unlock(input.value));
+        await attachPhotos();
         render();
         warmFoodDb();
       } catch {
@@ -753,6 +768,7 @@ async function boot() {
     if (res.locked) { showLock(); return; }
     state = normalize(res.state);
     if (!res.state) await vault.save(state);
+    await attachPhotos();
     render();
     warmFoodDb();
   } catch (err) {

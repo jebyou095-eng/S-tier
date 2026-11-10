@@ -118,8 +118,8 @@ def main():
 <style>{css}</style>
 </head>
 <body>
-{body}<script>{zxing}</script>
-<script>{claude_sdk}</script>
+{body}<script type="text/plain" id="lib-zxing">{zxing}</script>
+<script type="text/plain" id="lib-claude">{claude_sdk}</script>
 <script>{app}</script>
 </body>
 </html>
@@ -132,7 +132,7 @@ def main():
     # 2) claude.ai web-link version (the host supplies the document skeleton and CSP)
     web = f'''<title>Pocket Stats</title>
 <style>{css}</style>
-{body}<script>{zxing}</script>
+{body}<script type="text/plain" id="lib-zxing">{zxing}</script>
 <script>{bundle(hosted=True)}</script>
 '''
     (out / 'pocket-stats-web.html').write_text(web)

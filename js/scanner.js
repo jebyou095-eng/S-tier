@@ -1,6 +1,6 @@
 // Barcode scanning that runs entirely on the phone. Camera frames are decoded in
 // memory and thrown away; no image is ever saved or sent anywhere.
-import { h } from './ui.js';
+import { h, runBundledLib } from './ui.js';
 
 const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
 let zxingLoad = null;
@@ -19,7 +19,7 @@ async function nativeDetector() {
 }
 
 function loadZxing() {
-  if (globalThis.ZXing) return Promise.resolve(globalThis.ZXing); // bundled builds include it inline
+  if (globalThis.ZXing || runBundledLib('lib-zxing')) return Promise.resolve(globalThis.ZXing); // bundled builds carry it inline
   zxingLoad ??= new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = 'js/vendor/zxing.min.js';

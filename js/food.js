@@ -7,7 +7,7 @@ import {
   ACTIVITY, GOALS, targets, scale, sum, lookupBarcode, searchOnline, agreement, buildPlan, suggestions,
 } from './nutrition.js';
 import { scanBarcode, canonicalBarcode } from './scanner.js';
-import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo } from './fooddb.js';
+import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients } from './fooddb.js';
 import { recognizeFood, recognitionMode, preparePhoto, RecognitionError } from './recognize.js';
 
 const MEALS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' };
@@ -169,7 +169,7 @@ async function addMyPhoto(food, box) {
     try {
       const { dataUrl } = await preparePhoto(file, 320);
       F().myPhotos[food.id] = dataUrl;
-      await ctx.save();
+      await ctx.savePhoto(food.id, dataUrl);
       box.replaceWith(foodThumb(food, { size: 'lg', userPhoto: dataUrl }));
       toast('Photo saved on your phone');
     } catch {
@@ -253,10 +253,19 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel } = {}
       h('summary', {}, 'Ingredients in this portion'),
       h('p', { class: 'muted small' }, 'Remove or change an ingredient to see the new calories. Based on a typical recipe (USDA ingredient values).'),
       ingList) : null,
-    !hasRecipe && food.labelIngredients ? h('details', { class: 'ing-box' },
-      h('summary', {}, 'Ingredients (from the label)'),
-      h('p', { class: 'small' }, food.labelIngredients),
-      h('p', { class: 'muted small' }, 'Packaged product: the recipe is fixed, so ingredients can’t be removed.')) : null,
+    !hasRecipe && food.hasLabelIngredients ? h('details', {
+      class: 'ing-box',
+      ontoggle: async (e) => {
+        const box = e.currentTarget;
+        if (!box.open || box.dataset.loaded) return;
+        box.dataset.loaded = '1';
+        const text = box.querySelector('.label-ing');
+        try { text.textContent = (await labelIngredients(food)) || 'Not available.'; } catch { text.textContent = "Couldn't load the ingredients. Check your connection."; delete box.dataset.loaded; }
+      },
+    },
+    h('summary', {}, 'Ingredients (from the label)'),
+    h('p', { class: 'small label-ing' }, 'Loading…'),
+    h('p', { class: 'muted small' }, 'Packaged product: the recipe is fixed, so ingredients can’t be removed.')) : null,
     h('div', { class: 'row end' },
       edit ? h('button', { type: 'button', class: 'btn danger', onclick: () => done('delete') }, 'Delete') : null,
       h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, 'Cancel'),
@@ -338,7 +347,7 @@ function searchDialog(meal) {
     const status = h('p', { class: 'muted small' });
     const pick = (food) => done(food);
     const local = () => {
-      const res = dedupe(searchLocal(q.value, [...(F().moroccoDb ? foodDb() : []), ...F().saved])).slice(0, 30);
+      const res = dedupe(searchLocal(q.value, F().moroccoDb ? foodDb() : [], F().saved)).slice(0, 30);
       list.replaceChildren(...res.map((f) => resultRow(f, pick)));
       if (!q.value.trim()) {
         const recent = F().saved.slice(0, 8);
@@ -357,7 +366,8 @@ function searchDialog(meal) {
         : failed === 2 ? "Couldn't reach the databases. Check your connection." : 'No online results. Try simpler words.';
       online.replaceChildren(...results.map((f) => resultRow(f, pick)));
     };
-    q.addEventListener('input', local);
+    let timer = 0;
+    q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(local, 120); }); // wait for a pause in typing
     local();
     return h('div', { class: 'sheet-body search' },
       h('h2', {}, `Add to ${MEALS[meal]}`),
@@ -412,7 +422,8 @@ function browseDialog(meal) {
       more.hidden = shown.length <= limit;
       status.textContent = `${shown.length} foods`;
     };
-    q.addEventListener('input', () => { limit = 40; draw(); });
+    let timer = 0;
+    q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { limit = 40; draw(); }, 120); });
     const off = onFoodDb(draw);
     const close = (v) => { off(); done(v); };
     if (!foodDb().length) {
