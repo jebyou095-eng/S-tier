@@ -1,11 +1,12 @@
 // Gym tab: workout logger, exercise library with muscle maps and animated
 // demonstrations, progress analytics, and a safety & evidence guide.
-import { h, uid, toast, confirmDialog } from './ui.js';
+import { h, uid, toast, confirmDialog, modal } from './ui.js';
 import { dayKey, addDays, dayRange, parseDay } from './stats.js';
 import { barChart } from './charts.js';
 import { MUSCLES, EXERCISES, EX_BY_ID, PROGRAMS, REFERENCES } from './exercises.js';
 import { bodyMaps } from './body.js';
 import { demo } from './poses.js';
+import { analyze, adaptPlan, suggestions, nextDay, loadTip } from './coach.js';
 
 const LB = 0.45359237;
 const k0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
@@ -32,7 +33,11 @@ const fmtW = (kg) => `${k1.format(Math.round(toUnit(kg) * 4) / 4)} ${unit()}`;
 
 // ---------- data ----------
 export function freshGym() {
-  return { program: null, log: [], screen: null };
+  return { program: null, log: [], screen: null, sessions: [], adapt: freshAdapt() };
+}
+
+function freshAdapt() {
+  return { on: true, minutes: null, swaps: {}, removed: [], repeat: true, ignore: {}, dismissed: [] };
 }
 
 export function normalizeGym(raw) {
@@ -46,6 +51,19 @@ export function normalizeGym(raw) {
     out.log.push({ id: String(s.id || uid()).slice(0, 40), day: s.day, ts: Number.isFinite(+s.ts) ? +s.ts : Date.now(), ex: s.ex, kg, reps: Math.round(reps), pday: typeof s.pday === 'string' ? s.pday.slice(0, 20) : null });
   }
   if (raw.screen && typeof raw.screen === 'object') out.screen = { date: String(raw.screen.date || '').slice(0, 10), yes: Math.max(0, Math.min(7, +raw.screen.yes || 0)) };
+  for (const x of Array.isArray(raw.sessions) ? raw.sessions.slice(-200) : []) {
+    if (x && /^\d{4}-\d{2}-\d{2}$/.test(x.day) && typeof x.pday === 'string') {
+      out.sessions.push({ day: x.day, pday: x.pday.slice(0, 20), rating: ['easy', 'good', 'hard', 'too-much'].includes(x.rating) ? x.rating : null });
+    }
+  }
+  const a = raw.adapt && typeof raw.adapt === 'object' ? raw.adapt : {};
+  out.adapt.on = a.on !== false;
+  out.adapt.repeat = a.repeat !== false;
+  out.adapt.minutes = [20, 30, 45, 60, 75, 90].includes(a.minutes) ? a.minutes : null;
+  for (const [from, to] of Object.entries(a.swaps || {})) if (EX_BY_ID[from] && EX_BY_ID[to]) out.adapt.swaps[from] = to;
+  out.adapt.removed = (Array.isArray(a.removed) ? a.removed : []).filter((id) => EX_BY_ID[id]).slice(0, 40);
+  for (const [k, v] of Object.entries(a.ignore || {})) if (/^\w{1,20}$/.test(k) && /^\d{4}-\d{2}-\d{2}$/.test(v)) out.adapt.ignore[k] = v;
+  out.adapt.dismissed = (Array.isArray(a.dismissed) ? a.dismissed : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 40)).slice(0, 60);
   return out;
 }
 
@@ -57,25 +75,7 @@ function sessionsFor(ex) {
   return [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([day, sets]) => ({ day, sets: sets.sort((a, b) => a.ts - b.ts) }));
 }
 
-function repRange(r) {
-  const m = String(r).match(/(\d+)\s*[–-]\s*(\d+)/);
-  return m ? [+m[1], +m[2]] : null;
-}
 
-function overloadTip(ex, reps) {
-  const today = dayKey();
-  const last = sessionsFor(ex.id).find((s) => s.day !== today);
-  if (!last) return 'First time: pick a weight you could lift for 2–3 more reps than the target. Focus on form.';
-  const range = repRange(reps);
-  const heaviest = Math.max(...last.sets.map((s) => s.kg));
-  const top = last.sets.filter((s) => s.kg === heaviest);
-  if (range && heaviest > 0 && top.every((s) => s.reps >= range[1])) {
-    const inc = ex.kind === 'compound' && ['Legs', 'Back'].includes(ex.group) ? (isLb() ? '5–10 lb' : '2.5–5 kg') : (isLb() ? '2.5–5 lb' : '1–2.5 kg');
-    return `You hit ${range[1]}+ reps on every set last time → add ${inc} today.`;
-  }
-  if (range && top.some((s) => s.reps < range[0])) return 'Last time fell below the rep range. Keep the same weight, or drop 5–10%, and own the form.';
-  return 'Same weight as last time and try to beat it by 1 rep on at least one set.';
-}
 
 // ---------- rest timer ----------
 let timer = null;
@@ -120,15 +120,8 @@ function openDetail(id, from) {
 }
 
 // ---------- WORKOUT ----------
-function nextDayIndex(prog) {
-  const last = [...G().log].filter((s) => s.pday?.startsWith(`${G().program}:`)).sort((a, b) => b.ts - a.ts)[0];
-  if (!last) return 0;
-  const i = +last.pday.split(':')[1];
-  // Still training today? Stay on the same day.
-  return last.day === dayKey() ? i : (i + 1) % prog.days.length;
-}
 
-function exerciseCard(ex, sets, reps, pday) {
+function exerciseCard(ex, sets, reps, pday, notes = [], welcomeBack = false) {
   const today = dayKey();
   const done = G().log.filter((s) => s.ex === ex.id && s.day === today).sort((a, b) => a.ts - b.ts);
   const last = sessionsFor(ex.id).find((s) => s.day !== today);
@@ -141,7 +134,8 @@ function exerciseCard(ex, sets, reps, pday) {
       h('span', { class: 'grow' }, h('h2', {}, ex.name), h('span', { class: 'muted small' }, `${sets ? `${sets} sets × ${reps} · ` : ''}rest ${ex.kind === 'compound' ? '2–3 min' : '60–90 s'} · ${musclesText(ex.primary)}`)),
       h('span', { class: 'chev', 'aria-hidden': 'true' }, 'ⓘ')),
     last ? h('p', { class: 'muted small' }, `Last time (${parseDay(last.day).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}): ${last.sets.map((s) => `${k1.format(Math.round(toUnit(s.kg) * 4) / 4)}×${s.reps}`).join(', ')} ${unit()}`) : null,
-    h('p', { class: 'tip small' }, overloadTip(ex, reps)),
+    notes.length ? h('p', { class: 'adapted small' }, '↻ ', [...new Set(notes)].join(' · ')) : null,
+    h('p', { class: 'tip small' }, loadTip(ex, reps, sessionsFor(ex.id).filter((x) => x.day !== today), { welcomeBack, lb: isLb() })),
     done.length ? h('ol', { class: 'sets' }, ...done.map((s) => h('li', {},
       h('span', { class: 'grow' }, `${fmtW(s.kg)} × ${s.reps}`),
       h('button', { class: 'icon-btn small', 'aria-label': 'Delete set', onclick: async () => { G().log = G().log.filter((x) => x !== s); await ctx.commit(); } }, '✕')))) : null,
@@ -182,19 +176,29 @@ function viewWorkout() {
         h('button', { class: 'btn primary wide', onclick: async () => { G().program = k; pdayIndex = null; await ctx.commit(); } }, 'Start this program'))));
     return out;
   }
-  const idx = pdayIndex ?? nextDayIndex(prog);
-  const [dayName, list] = prog.days[idx];
+  const today = dayKey();
+  const ad = G().adapt;
+  for (const [k, v] of Object.entries(ad.ignore)) if (v !== today) delete ad.ignore[k]; // "undo" lasts for today only
+  const a = analyze(G(), today);
+  const next = nextDay(G(), prog, a, today);
+  const idx = pdayIndex ?? next.idx;
+  const [dayName] = prog.days[idx];
+  const plan = adaptPlan(G(), idx, a);
+  const sugg = suggestions(G(), a);
   const pday = `${G().program}:${idx}`;
-  const todaySets = G().log.filter((s) => s.day === dayKey());
+  const todaySets = G().log.filter((x) => x.day === today && x.pday === pday);
+  const plannedSets = plan.items.reduce((t, x) => t + x.sets, 0);
   out.push(
-    h('div', { class: 'row' }, h('h1', { class: 'grow' }, dayName), h('span', { class: 'muted small' }, todaySets.length ? `${todaySets.length} sets today` : prog.name.split(' · ')[0])),
+    h('div', { class: 'row' }, h('h1', { class: 'grow' }, dayName), h('span', { class: 'muted small' }, `≈ ${plan.minutes} min · ${todaySets.length}/${plannedSets} sets`)),
     h('div', { class: 'chips' }, ...prog.days.map(([n], i) => h('button', { class: `chip${i === idx ? ' on' : ''}`, onclick: () => { pdayIndex = i; ctx.render(); } }, n))),
+    coachCard(prog, a, plan, sugg, next, pdayIndex === null),
     h('p', { class: 'muted small' }, 'Warm up 5–10 min (bike, brisk walk), then do 1–2 light sets before your first heavy exercise. Stop each set with about 1–3 reps left in the tank.'),
-    ...list.map(([id, sets, reps]) => exerciseCard(EX_BY_ID[id], sets, reps, pday)),
-    ...extraExercises.filter((id) => !list.some(([x]) => x === id)).map((id) => exerciseCard(EX_BY_ID[id], 0, '8–15', pday)),
+    ...plan.items.map((it) => exerciseCard(EX_BY_ID[it.id], it.sets, it.reps, pday, it.notes, plan.welcomeBack)),
+    ...extraExercises.filter((id) => !plan.items.some((x) => x.id === id)).map((id) => exerciseCard(EX_BY_ID[id], 0, '8–15', pday)),
     h('details', { class: 'card add-ex' },
       h('summary', {}, '+ Add another exercise'),
       h('ul', { class: 'entries' }, ...EXERCISES.map((ex) => exRow(ex, () => { if (!extraExercises.includes(ex.id)) extraExercises.push(ex.id); ctx.render(); })))),
+    todaySets.length ? h('button', { class: 'btn primary wide', onclick: () => finishWorkout(pday, plannedSets) }, '✓ Finish workout') : null,
     h('button', {
       class: 'link small', onclick: async () => {
         if (!await confirmDialog('Change program?', 'Your logged sets are kept.', 'Change')) return;
@@ -202,6 +206,80 @@ function viewWorkout() {
       },
     }, `Program: ${prog.name} · change`));
   return out;
+}
+
+// ---------- adaptive coach ----------
+function coachCard(prog, a, plan, sugg, next, auto) {
+  const ad = G().adapt;
+  const today = dayKey();
+  const save = async () => { await ctx.commit(); };
+  if (!ad.on) {
+    return h('article', { class: 'card coach off' }, h('div', { class: 'row' },
+      h('span', { class: 'grow muted small' }, 'Adaptive coach is off: the plan is shown exactly as written.'),
+      h('button', { class: 'link small', onclick: async () => { ad.on = true; await save(); } }, 'Turn on')));
+  }
+  const lines = [];
+  if (auto && next.reason) {
+    lines.push(h('li', {}, h('span', { class: 'grow' }, next.reason),
+      h('button', { class: 'link small', onclick: () => { pdayIndex = (next.idx + 1) % prog.days.length; ctx.render(); } }, 'Do the next day')));
+  }
+  for (const c of plan.changes) {
+    lines.push(h('li', {}, h('span', { class: 'grow' }, c.text),
+      c.key === 'removed'
+        ? h('button', { class: 'link small', onclick: async () => { ad.removed = []; await save(); } }, 'Restore all')
+        : c.key === 'easy' ? null
+          : h('button', { class: 'link small', onclick: async () => { ad.ignore[c.key] = today; if (c.key === 'time') ad.minutes = null; await save(); } }, 'Undo for today')));
+  }
+  for (const sg of sugg) {
+    if (sg.type === 'skip') {
+      const ex = EX_BY_ID[sg.id]; const alt = sg.alt && EX_BY_ID[sg.alt];
+      lines.push(h('li', { class: 'suggest' }, h('span', { class: 'grow' }, sg.text, ' Want to change it?'),
+        h('span', { class: 'row wrap' },
+          alt ? h('button', { class: 'btn ghost small-btn', onclick: async () => { ad.swaps[sg.id] = sg.alt; await save(); toast(`${ex.name} → ${alt.name}`); } }, `Swap for ${alt.name}`) : null,
+          h('button', { class: 'btn ghost small-btn', onclick: async () => { ad.removed.push(sg.id); await save(); } }, 'Remove it'),
+          h('button', { class: 'link small', onclick: async () => { ad.dismissed.push(sg.key); await save(); } }, 'Keep it'))));
+    } else if (sg.type === 'program') {
+      lines.push(h('li', { class: 'suggest' }, h('span', { class: 'grow' }, sg.text),
+        h('span', { class: 'row wrap' },
+          h('button', { class: 'btn ghost small-btn', onclick: async () => { G().program = sg.to; pdayIndex = null; ad.swaps = {}; ad.removed = []; await save(); toast('Switched to Full body'); } }, 'Switch to Full body'),
+          h('button', { class: 'link small', onclick: async () => { ad.dismissed.push(sg.key); await save(); } }, 'Not now'))));
+    }
+  }
+  const swaps = Object.entries(ad.swaps);
+  if (swaps.length) {
+    lines.push(h('li', {}, h('span', { class: 'grow muted' }, `Your swaps: ${swaps.map(([f, t]) => `${EX_BY_ID[f].name} → ${EX_BY_ID[t].name}`).join(', ')}`),
+      h('button', { class: 'link small', onclick: async () => { ad.swaps = {}; await save(); } }, 'Undo swaps')));
+  }
+  const stats = a.sessions.length
+    ? `Based on ${a.sessions.length} workout${a.sessions.length > 1 ? 's' : ''}${a.completionAvg !== null ? ` · finished ${Math.round(a.completionAvg * 100)}% of the last ${Math.min(3, a.sessions.length)}` : ''}${a.typicalMinutes ? ` · usually ~${Math.round(a.typicalMinutes)} min` : ''}${a.perWeek !== null && a.weeksOfData >= 2 ? ` · ${a.perWeek.toFixed(1)} days/week` : ''}`
+    : 'The coach learns from your workouts: how long you train, what you finish, what you skip and how it feels.';
+  return h('article', { class: 'card coach' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Your coach'),
+      h('button', { class: 'link small', onclick: async () => { ad.on = false; await save(); } }, 'Turn off')),
+    lines.length ? h('ul', { class: 'coach-list' }, ...lines) : h('p', { class: 'muted small' }, 'Nothing to change today: the plan fits how you’ve been training.'),
+    h('div', { class: 'time-row' }, h('span', { class: 'muted small' }, 'Time today'),
+      h('div', { class: 'chips' }, ...[[null, 'Auto'], [30, '30'], [45, '45'], [60, '60'], [90, '90 min']].map(([v, l]) => h('button', {
+        class: `chip small${ad.minutes === v ? ' on' : ''}`, onclick: async () => { ad.minutes = v; delete ad.ignore.time; await save(); },
+      }, l)))),
+    h('p', { class: 'muted small' }, stats));
+}
+
+function finishWorkout(pday, plannedSets) {
+  const today = dayKey();
+  const done = G().log.filter((x) => x.day === today && x.pday === pday).length;
+  return modal((close) => h('div', { class: 'sheet-body' },
+    h('h2', {}, done >= plannedSets ? 'Workout complete 💪' : 'Good work today'),
+    h('p', {}, `${done} of ${plannedSets} planned sets${done < plannedSets ? '. Stopping early is fine: the coach adjusts the next plans to how you really train.' : '.'}`),
+    h('p', { class: 'muted small' }, 'How did it feel? (helps the coach set the next workouts)'),
+    h('div', { class: 'feel' }, ...[['easy', '😌', 'Easy'], ['good', '🙂', 'Good'], ['hard', '😤', 'Hard'], ['too-much', '🥵', 'Too much']].map(([k, e, l]) => h('button', {
+      class: 'feel-btn', type: 'button',
+      onclick: async () => {
+        G().sessions = G().sessions.filter((x) => !(x.day === today && x.pday === pday));
+        G().sessions.push({ day: today, pday, rating: k });
+        close(k); await ctx.commit(); toast('Saved. See you next time!');
+      },
+    }, h('span', { class: 'feel-emoji', 'aria-hidden': 'true' }, e), l))),
+    h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => close(null) }, 'Skip'))));
 }
 
 // ---------- LIBRARY ----------

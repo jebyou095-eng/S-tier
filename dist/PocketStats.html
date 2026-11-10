@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-v73PJshBuG69qoE9LV+VO8DLOixsYstjq4CV1wYrtIs='; style-src 'sha256-V8cBVcXlw+Qs4WRMfW8JZIKu8m3Q7QkwOnJUGDkJd2w='; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-07G+Y+j97P5GPSELFChA+cHKixJi8NNlYwFfTAQQAlU='; style-src 'sha256-JH7E/q61Yl3+Hkgs3NM/+f3oNrVjyypI5SXy204GqcM='; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#2f7d6d">
@@ -561,6 +561,21 @@ dialog.scanner::backdrop { background: #000; }
 .meal { padding: 12px 16px; }
 .meal .tracker-head { margin-bottom: 0; }
 .meal .entries { margin-top: 6px; }
+
+/* ---------- Adaptive coach ---------- */
+.coach { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.coach.off { padding: 10px 16px; }
+.coach-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+.coach-list li { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; font-size: 0.92rem; padding: 8px 10px; background: var(--soft); border-radius: 10px; }
+.coach-list li .grow { white-space: normal; flex: 1 1 200px; }
+.coach-list li.suggest { background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.small-btn { min-height: 36px; padding: 6px 12px; font-size: 0.85rem; }
+.time-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.time-row .chips { margin: 4px 0; }
+.adapted { color: var(--accent); font-weight: 600; margin: 2px 0 6px; }
+.feel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0; }
+.feel-btn { display: grid; justify-items: center; gap: 4px; padding: 12px 4px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); font-weight: 600; font-size: 0.85rem; cursor: pointer; }
+.feel-emoji { font-size: 1.6rem; }
 </style>
 </head>
 <body>
@@ -10463,15 +10478,230 @@ function demo(patternId, label) {
 
 return { PATTERNS, demo };
 })();
+const __m_coach = (() => {
+// Adaptive coach: learns how you actually train from your own logs and adapts the plan.
+// Pure functions (no screen code), so every rule is easy to test. Runs on the phone only.
+const { EX_BY_ID, PROGRAMS } = __m_exercises;
+const { dayKey, addDays, parseDay } = __m_stats;
+
+const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const daysBetween = (a, b) => Math.round((parseDay(b) - parseDay(a)) / 86400000);
+
+/** Planned exercises for a program day id like "fb3:0" → [[exId, sets, reps], ...]. */
+function planned(pday) {
+  const [prog, i] = String(pday || '').split(':');
+  return PROGRAMS[prog]?.days[+i]?.[1] || [];
+}
+
+/**
+ * Group logged sets into sessions (one per day + program day), oldest first. `adapt` makes a
+ * swapped exercise count for the one it replaced, and leaves removed ones out of the plan.
+ */
+function sessionsFromLog(log, adapt = {}) {
+  const back = Object.fromEntries(Object.entries(adapt.swaps || {}).map(([from, to]) => [to, from]));
+  const map = new Map();
+  for (const s of log) {
+    if (!s.pday) continue;
+    const k = `${s.day}|${s.pday}`;
+    if (!map.has(k)) map.set(k, { day: s.day, pday: s.pday, sets: [], start: s.ts, end: s.ts });
+    const x = map.get(k);
+    x.sets.push(s);
+    x.start = Math.min(x.start, s.ts); x.end = Math.max(x.end, s.ts);
+  }
+  return [...map.values()].sort((a, b) => a.day.localeCompare(b.day) || a.start - b.start).map((x) => {
+    const plan = planned(x.pday).filter(([id]) => !(adapt.removed || []).includes(id));
+    const count = {};
+    for (const s of x.sets) { const id = back[s.ex] || s.ex; count[id] = (count[id] || 0) + 1; }
+    const plannedSets = plan.reduce((t, [, n]) => t + n, 0);
+    const doneSets = plan.reduce((t, [id, n]) => t + Math.min(n, count[id] || 0), 0);
+    // Exercises with no sets, split into "skipped" (something later in the plan was done)
+    // and "ran out" (nothing after it was done: the session ended early).
+    let lastDone = -1;
+    plan.forEach(([id], i) => { if (count[id]) lastDone = i; });
+    const skipped = []; const ranOut = [];
+    plan.forEach(([id], i) => { if (!count[id]) (i < lastDone ? skipped : ranOut).push(id); });
+    return { ...x, count, plannedSets, doneSets, completion: plannedSets ? doneSets / plannedSets : 1, skipped, ranOut, minutes: (x.end - x.start) / 60000 };
+  });
+}
+
+/** Everything the coach knows about your training, from the log (+ optional ratings). */
+function analyze(gym, today = dayKey()) {
+  const program = gym.program;
+  const all = sessionsFromLog(gym.log || [], gym.adapt || {});
+  const mine = all.filter((s) => s.pday.startsWith(`${program}:`));
+  const recent = mine.slice(-6);
+  const last3 = mine.slice(-3);
+  const completionAvg = last3.length ? last3.reduce((t, s) => t + s.completion, 0) / last3.length : null;
+
+  // Minutes per set (including rest), from gaps between consecutive sets
+  const gaps = [];
+  for (const s of all.slice(-10)) {
+    const ts = s.sets.map((x) => x.ts).sort((a, b) => a - b);
+    for (let i = 1; i < ts.length; i++) { const g = (ts[i] - ts[i - 1]) / 60000; if (g > 0.5 && g < 8) gaps.push(g); }
+  }
+  const setMinutes = Math.min(5, Math.max(1.2, median(gaps) ?? 2.5));
+  // How long you actually train: sessions with ≥ 4 sets
+  const lengths = all.slice(-6).filter((s) => s.sets.length >= 4).map((s) => s.minutes + setMinutes);
+  const typicalMinutes = median(lengths);
+
+  // Per exercise: how often it was skipped (not just "ran out of time")
+  const skip = {};
+  for (const s of recent) {
+    for (const [id] of planned(s.pday).filter(([x]) => !(gym.adapt?.removed || []).includes(x))) {
+      skip[id] ??= { planned: 0, skipped: 0, ranOut: 0 };
+      skip[id].planned++;
+      if (s.skipped.includes(id)) skip[id].skipped++;
+      if (s.ranOut.includes(id)) skip[id].ranOut++;
+    }
+  }
+
+  // Training days per week over the last 3 weeks
+  const since = addDays(today, -20);
+  const days = new Set(all.filter((s) => s.day >= since && s.sets.length >= 3).map((s) => s.day));
+  const weeksOfData = all.length ? Math.min(3, Math.max(1, Math.ceil((daysBetween(all[0].day, today) + 1) / 7))) : 0;
+  const perWeek = weeksOfData ? days.size / weeksOfData : null;
+  const lastDay = all.length ? all[all.length - 1].day : null;
+  const daysSinceLast = lastDay ? daysBetween(lastDay, today) : null;
+  const ratings = (gym.sessions || []).filter((r) => r.rating).slice(-3).map((r) => r.rating);
+
+  return { sessions: mine, all, recent, completionAvg, setMinutes, typicalMinutes, skip, perWeek, weeksOfData, daysSinceLast, lastSession: mine[mine.length - 1] || null, ratings };
+}
+
+const isCompound = (id) => EX_BY_ID[id]?.kind === 'compound';
+
+/** Rough minutes for an exercise: sets × minutes per set (compounds rest longer) + 1 min to set up. */
+function exerciseMinutes(id, sets, setMinutes = 2.5) {
+  return sets * setMinutes * (isCompound(id) ? 1.2 : 0.8) + 1;
+}
+
+/** Which program day to do next. An unfinished last session (< 50%) is repeated. */
+function nextDay(gym, prog, a, today = dayKey()) {
+  const last = a.lastSession;
+  if (!last) return { idx: 0, reason: null };
+  const i = +last.pday.split(':')[1];
+  if (last.day === today) return { idx: i, reason: null };
+  if (gym.adapt?.on !== false && gym.adapt?.repeat !== false && last.completion < 0.5 && last.sets.length) {
+    return { idx: i, reason: `You did ${Math.round(last.completion * 100)}% of ${prog.days[i][0]} last time, so it’s on again today.` };
+  }
+  return { idx: (i + 1) % prog.days.length, reason: null };
+}
+
+/**
+ * Today's plan, adapted to you. Returns the exercises plus a list of changes (each explained,
+ * each can be undone in the app).
+ */
+function adaptPlan(gym, idx, a) {
+  const prog = PROGRAMS[gym.program];
+  const base = prog.days[idx][1].map(([id, sets, reps]) => ({ id, sets, reps, from: id, notes: [] }));
+  const ad = gym.adapt || {};
+  const changes = [];
+  if (ad.on === false) return { items: base, changes, minutes: Math.round(base.reduce((t, x) => t + exerciseMinutes(x.id, x.sets, a.setMinutes), 0)), budget: null, welcomeBack: false };
+
+  let items = base.map((x) => ({ ...x, notes: [] }));
+  // 1. Your swaps and removals
+  for (const it of items) {
+    const to = ad.swaps?.[it.id];
+    if (to && EX_BY_ID[to]) { it.notes.push(`instead of ${EX_BY_ID[it.id].name}`); it.id = to; }
+  }
+  const removed = items.filter((x) => ad.removed?.includes(x.from));
+  if (removed.length) {
+    items = items.filter((x) => !ad.removed.includes(x.from));
+    changes.push({ key: 'removed', text: `Left out: ${removed.map((x) => EX_BY_ID[x.from].name).join(', ')} (you chose this).` });
+  }
+  // 2. Back after a break: one set fewer per exercise, lighter weights
+  const welcomeBack = a.daysSinceLast !== null && a.daysSinceLast >= 10;
+  if (welcomeBack && !ad.ignore?.welcome) {
+    for (const it of items) if (it.sets > 2) { it.sets -= 1; it.notes.push('1 set fewer: back after a break'); }
+    changes.push({ key: 'welcome', text: `Welcome back! ${a.daysSinceLast} days since your last workout, so today is lighter: one set fewer and about 15% less weight. You’ll be back to normal next time.` });
+  }
+  // 3. How sessions felt
+  const r = a.ratings;
+  if (r.length >= 2 && r.slice(-2).every((x) => x === 'too-much') && !ad.ignore?.tooMuch) {
+    for (const it of items) if (!isCompound(it.id) && it.sets > 1) { it.sets -= 1; it.notes.push('1 set fewer: last sessions felt like too much'); }
+    changes.push({ key: 'tooMuch', text: 'Your last two workouts felt like too much, so the extra (isolation) exercises have one set fewer. Recovery is where you grow.' });
+  } else if (r.length >= 2 && r.slice(-2).every((x) => x === 'easy') && (a.completionAvg ?? 0) >= 0.9 && !ad.ignore?.easy) {
+    changes.push({ key: 'easy', text: 'Your last workouts felt easy: go a bit heavier today (+2.5 kg on big lifts, +1 kg on small ones) or stop sets closer to failure.' });
+  }
+  // 4. Fit the time you actually have
+  const budget = ad.minutes || (a.completionAvg !== null && a.completionAvg < 0.75 && a.sessions.length >= 3 && a.typicalMinutes ? Math.max(20, Math.round(a.typicalMinutes / 5) * 5) : null);
+  const total = () => items.reduce((t, x) => t + exerciseMinutes(x.id, x.sets, a.setMinutes), 0);
+  const before = Math.round(total());
+  if (budget && total() > budget && !ad.ignore?.time) {
+    // Big lifts first, so the most valuable work happens even if you stop early
+    items.sort((x, y) => isCompound(y.id) - isCompound(x.id));
+    const trimmed = [];
+    const step = () => {
+      const iso = items.filter((x) => !isCompound(x.id));
+      const big = items.filter((x) => isCompound(x.id));
+      const reduce = (x, min, why) => { if (x && x.sets > min) { x.sets -= 1; x.notes.push(why); return true; } return false; };
+      for (const x of iso) if (reduce(x, 2, 'shortened to fit your time')) return true;
+      if (iso.length && items.length > 3) { const drop = iso[iso.length - 1]; items = items.filter((y) => y !== drop); trimmed.push(drop); return true; }
+      for (const x of [...big].reverse()) if (reduce(x, 2, 'shortened to fit your time')) return true;
+      return false;
+    };
+    let guard = 30;
+    while (total() > budget && guard-- > 0 && step());
+    const why = ad.minutes ? `you set ${ad.minutes} min` : `you usually train about ${budget} min and finished ${Math.round(a.completionAvg * 100)}% of your last 3 workouts`;
+    const now = Math.round(total());
+    changes.push({ key: 'time', text: `Shortened to about ${now} min (${why}): big lifts first${trimmed.length ? `, left out ${trimmed.map((x) => EX_BY_ID[x.id].name).join(', ')}` : ''}, extra sets trimmed. The full plan is about ${before} min.${now > budget + 2 ? ' Your main lifts are kept even if it runs a little over.' : ''}` });
+  }
+  return { items, changes, minutes: Math.round(total()), budget, welcomeBack: welcomeBack && !ad.ignore?.welcome };
+}
+
+/** Suggestions you can accept or dismiss (they never change anything on their own). */
+function suggestions(gym, a) {
+  const out = [];
+  const ad = gym.adapt || {};
+  if (ad.on === false) return out;
+  const prog = PROGRAMS[gym.program];
+  // Exercises you keep skipping (while doing ones after them)
+  for (const [id, s] of Object.entries(a.skip)) {
+    if (s.planned >= 3 && s.skipped / s.planned >= 0.6 && !ad.removed?.includes(id) && !ad.swaps?.[id] && !ad.dismissed?.includes(`skip:${id}`)) {
+      const inPlan = new Set(prog.days.flatMap(([, l]) => l.map(([x]) => x)));
+      const alt = (EX_BY_ID[id].alts || []).find((x) => !inPlan.has(x)) || EX_BY_ID[id].alts?.[0];
+      out.push({ key: `skip:${id}`, type: 'skip', id, alt, text: `You skipped ${EX_BY_ID[id].name} in ${s.skipped} of your last ${s.planned} workouts.` });
+    }
+  }
+  // Program asks for more days than you train
+  const want = prog.days.length;
+  if (a.perWeek !== null && a.weeksOfData >= 3 && gym.program !== 'fb3' && a.perWeek + 0.75 < Math.min(want, gym.program === 'ppl' ? 3 : want) && !ad.dismissed?.includes('freq')) {
+    out.push({ key: 'freq', type: 'program', to: 'fb3', text: `You’ve trained about ${a.perWeek.toFixed(1)} days a week lately, but ${prog.name.split(' · ')[0]} is built for ${gym.program === 'ppl' ? '3–6' : want}. Full body (2–3 days) would train every muscle twice a week on your schedule.` });
+  }
+  return out;
+}
+
+/** Tip for one exercise: progression, deload after repeated misses, or lighter after a break. */
+function loadTip(ex, reps, history, { welcomeBack = false, lb = false } = {}) {
+  const prior = history; // sessions for this exercise, newest first, excluding today
+  if (!prior.length) return 'First time: pick a weight you could lift for 2–3 more reps than the target. Focus on form.';
+  if (welcomeBack) return 'Back after a break: use about 15% less weight than last time and focus on clean reps.';
+  const m = String(reps).match(/(\d+)\s*[–-]\s*(\d+)/);
+  const range = m ? [+m[1], +m[2]] : null;
+  const top = (s) => { const w = Math.max(...s.sets.map((x) => x.kg)); return s.sets.filter((x) => x.kg === w); };
+  if (range && prior.length >= 2 && prior.slice(0, 2).every((s) => top(s).some((x) => x.reps < range[0]))) {
+    return `Two sessions in a row below ${range[0]} reps: drop the weight by about 10% today and build back up. That’s normal and gets you moving again.`;
+  }
+  const last = top(prior[0]);
+  if (range && last[0]?.kg > 0 && last.every((x) => x.reps >= range[1])) {
+    const inc = ex.kind === 'compound' && ['Legs', 'Back'].includes(ex.group) ? (lb ? '5–10 lb' : '2.5–5 kg') : (lb ? '2.5–5 lb' : '1–2.5 kg');
+    return `You hit ${range[1]}+ reps on every set last time → add ${inc} today.`;
+  }
+  if (range && last.some((x) => x.reps < range[0])) return 'Last time fell below the rep range. Keep the same weight, or drop 5–10%, and own the form.';
+  return 'Same weight as last time and try to beat it by 1 rep on at least one set.';
+}
+
+return { planned, sessionsFromLog, analyze, exerciseMinutes, nextDay, adaptPlan, suggestions, loadTip };
+})();
 const __m_gym = (() => {
 // Gym tab: workout logger, exercise library with muscle maps and animated
 // demonstrations, progress analytics, and a safety & evidence guide.
-const { h, uid, toast, confirmDialog } = __m_ui;
+const { h, uid, toast, confirmDialog, modal } = __m_ui;
 const { dayKey, addDays, dayRange, parseDay } = __m_stats;
 const { barChart } = __m_charts;
 const { MUSCLES, EXERCISES, EX_BY_ID, PROGRAMS, REFERENCES } = __m_exercises;
 const { bodyMaps } = __m_body;
 const { demo } = __m_poses;
+const { analyze, adaptPlan, suggestions, nextDay, loadTip } = __m_coach;
 
 const LB = 0.45359237;
 const k0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
@@ -10498,7 +10728,11 @@ const fmtW = (kg) => `${k1.format(Math.round(toUnit(kg) * 4) / 4)} ${unit()}`;
 
 // ---------- data ----------
 function freshGym() {
-  return { program: null, log: [], screen: null };
+  return { program: null, log: [], screen: null, sessions: [], adapt: freshAdapt() };
+}
+
+function freshAdapt() {
+  return { on: true, minutes: null, swaps: {}, removed: [], repeat: true, ignore: {}, dismissed: [] };
 }
 
 function normalizeGym(raw) {
@@ -10512,6 +10746,19 @@ function normalizeGym(raw) {
     out.log.push({ id: String(s.id || uid()).slice(0, 40), day: s.day, ts: Number.isFinite(+s.ts) ? +s.ts : Date.now(), ex: s.ex, kg, reps: Math.round(reps), pday: typeof s.pday === 'string' ? s.pday.slice(0, 20) : null });
   }
   if (raw.screen && typeof raw.screen === 'object') out.screen = { date: String(raw.screen.date || '').slice(0, 10), yes: Math.max(0, Math.min(7, +raw.screen.yes || 0)) };
+  for (const x of Array.isArray(raw.sessions) ? raw.sessions.slice(-200) : []) {
+    if (x && /^\d{4}-\d{2}-\d{2}$/.test(x.day) && typeof x.pday === 'string') {
+      out.sessions.push({ day: x.day, pday: x.pday.slice(0, 20), rating: ['easy', 'good', 'hard', 'too-much'].includes(x.rating) ? x.rating : null });
+    }
+  }
+  const a = raw.adapt && typeof raw.adapt === 'object' ? raw.adapt : {};
+  out.adapt.on = a.on !== false;
+  out.adapt.repeat = a.repeat !== false;
+  out.adapt.minutes = [20, 30, 45, 60, 75, 90].includes(a.minutes) ? a.minutes : null;
+  for (const [from, to] of Object.entries(a.swaps || {})) if (EX_BY_ID[from] && EX_BY_ID[to]) out.adapt.swaps[from] = to;
+  out.adapt.removed = (Array.isArray(a.removed) ? a.removed : []).filter((id) => EX_BY_ID[id]).slice(0, 40);
+  for (const [k, v] of Object.entries(a.ignore || {})) if (/^\w{1,20}$/.test(k) && /^\d{4}-\d{2}-\d{2}$/.test(v)) out.adapt.ignore[k] = v;
+  out.adapt.dismissed = (Array.isArray(a.dismissed) ? a.dismissed : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 40)).slice(0, 60);
   return out;
 }
 
@@ -10523,25 +10770,7 @@ function sessionsFor(ex) {
   return [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([day, sets]) => ({ day, sets: sets.sort((a, b) => a.ts - b.ts) }));
 }
 
-function repRange(r) {
-  const m = String(r).match(/(\d+)\s*[–-]\s*(\d+)/);
-  return m ? [+m[1], +m[2]] : null;
-}
 
-function overloadTip(ex, reps) {
-  const today = dayKey();
-  const last = sessionsFor(ex.id).find((s) => s.day !== today);
-  if (!last) return 'First time: pick a weight you could lift for 2–3 more reps than the target. Focus on form.';
-  const range = repRange(reps);
-  const heaviest = Math.max(...last.sets.map((s) => s.kg));
-  const top = last.sets.filter((s) => s.kg === heaviest);
-  if (range && heaviest > 0 && top.every((s) => s.reps >= range[1])) {
-    const inc = ex.kind === 'compound' && ['Legs', 'Back'].includes(ex.group) ? (isLb() ? '5–10 lb' : '2.5–5 kg') : (isLb() ? '2.5–5 lb' : '1–2.5 kg');
-    return `You hit ${range[1]}+ reps on every set last time → add ${inc} today.`;
-  }
-  if (range && top.some((s) => s.reps < range[0])) return 'Last time fell below the rep range. Keep the same weight, or drop 5–10%, and own the form.';
-  return 'Same weight as last time and try to beat it by 1 rep on at least one set.';
-}
 
 // ---------- rest timer ----------
 let timer = null;
@@ -10586,15 +10815,8 @@ function openDetail(id, from) {
 }
 
 // ---------- WORKOUT ----------
-function nextDayIndex(prog) {
-  const last = [...G().log].filter((s) => s.pday?.startsWith(`${G().program}:`)).sort((a, b) => b.ts - a.ts)[0];
-  if (!last) return 0;
-  const i = +last.pday.split(':')[1];
-  // Still training today? Stay on the same day.
-  return last.day === dayKey() ? i : (i + 1) % prog.days.length;
-}
 
-function exerciseCard(ex, sets, reps, pday) {
+function exerciseCard(ex, sets, reps, pday, notes = [], welcomeBack = false) {
   const today = dayKey();
   const done = G().log.filter((s) => s.ex === ex.id && s.day === today).sort((a, b) => a.ts - b.ts);
   const last = sessionsFor(ex.id).find((s) => s.day !== today);
@@ -10607,7 +10829,8 @@ function exerciseCard(ex, sets, reps, pday) {
       h('span', { class: 'grow' }, h('h2', {}, ex.name), h('span', { class: 'muted small' }, `${sets ? `${sets} sets × ${reps} · ` : ''}rest ${ex.kind === 'compound' ? '2–3 min' : '60–90 s'} · ${musclesText(ex.primary)}`)),
       h('span', { class: 'chev', 'aria-hidden': 'true' }, 'ⓘ')),
     last ? h('p', { class: 'muted small' }, `Last time (${parseDay(last.day).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}): ${last.sets.map((s) => `${k1.format(Math.round(toUnit(s.kg) * 4) / 4)}×${s.reps}`).join(', ')} ${unit()}`) : null,
-    h('p', { class: 'tip small' }, overloadTip(ex, reps)),
+    notes.length ? h('p', { class: 'adapted small' }, '↻ ', [...new Set(notes)].join(' · ')) : null,
+    h('p', { class: 'tip small' }, loadTip(ex, reps, sessionsFor(ex.id).filter((x) => x.day !== today), { welcomeBack, lb: isLb() })),
     done.length ? h('ol', { class: 'sets' }, ...done.map((s) => h('li', {},
       h('span', { class: 'grow' }, `${fmtW(s.kg)} × ${s.reps}`),
       h('button', { class: 'icon-btn small', 'aria-label': 'Delete set', onclick: async () => { G().log = G().log.filter((x) => x !== s); await ctx.commit(); } }, '✕')))) : null,
@@ -10648,19 +10871,29 @@ function viewWorkout() {
         h('button', { class: 'btn primary wide', onclick: async () => { G().program = k; pdayIndex = null; await ctx.commit(); } }, 'Start this program'))));
     return out;
   }
-  const idx = pdayIndex ?? nextDayIndex(prog);
-  const [dayName, list] = prog.days[idx];
+  const today = dayKey();
+  const ad = G().adapt;
+  for (const [k, v] of Object.entries(ad.ignore)) if (v !== today) delete ad.ignore[k]; // "undo" lasts for today only
+  const a = analyze(G(), today);
+  const next = nextDay(G(), prog, a, today);
+  const idx = pdayIndex ?? next.idx;
+  const [dayName] = prog.days[idx];
+  const plan = adaptPlan(G(), idx, a);
+  const sugg = suggestions(G(), a);
   const pday = `${G().program}:${idx}`;
-  const todaySets = G().log.filter((s) => s.day === dayKey());
+  const todaySets = G().log.filter((x) => x.day === today && x.pday === pday);
+  const plannedSets = plan.items.reduce((t, x) => t + x.sets, 0);
   out.push(
-    h('div', { class: 'row' }, h('h1', { class: 'grow' }, dayName), h('span', { class: 'muted small' }, todaySets.length ? `${todaySets.length} sets today` : prog.name.split(' · ')[0])),
+    h('div', { class: 'row' }, h('h1', { class: 'grow' }, dayName), h('span', { class: 'muted small' }, `≈ ${plan.minutes} min · ${todaySets.length}/${plannedSets} sets`)),
     h('div', { class: 'chips' }, ...prog.days.map(([n], i) => h('button', { class: `chip${i === idx ? ' on' : ''}`, onclick: () => { pdayIndex = i; ctx.render(); } }, n))),
+    coachCard(prog, a, plan, sugg, next, pdayIndex === null),
     h('p', { class: 'muted small' }, 'Warm up 5–10 min (bike, brisk walk), then do 1–2 light sets before your first heavy exercise. Stop each set with about 1–3 reps left in the tank.'),
-    ...list.map(([id, sets, reps]) => exerciseCard(EX_BY_ID[id], sets, reps, pday)),
-    ...extraExercises.filter((id) => !list.some(([x]) => x === id)).map((id) => exerciseCard(EX_BY_ID[id], 0, '8–15', pday)),
+    ...plan.items.map((it) => exerciseCard(EX_BY_ID[it.id], it.sets, it.reps, pday, it.notes, plan.welcomeBack)),
+    ...extraExercises.filter((id) => !plan.items.some((x) => x.id === id)).map((id) => exerciseCard(EX_BY_ID[id], 0, '8–15', pday)),
     h('details', { class: 'card add-ex' },
       h('summary', {}, '+ Add another exercise'),
       h('ul', { class: 'entries' }, ...EXERCISES.map((ex) => exRow(ex, () => { if (!extraExercises.includes(ex.id)) extraExercises.push(ex.id); ctx.render(); })))),
+    todaySets.length ? h('button', { class: 'btn primary wide', onclick: () => finishWorkout(pday, plannedSets) }, '✓ Finish workout') : null,
     h('button', {
       class: 'link small', onclick: async () => {
         if (!await confirmDialog('Change program?', 'Your logged sets are kept.', 'Change')) return;
@@ -10668,6 +10901,80 @@ function viewWorkout() {
       },
     }, `Program: ${prog.name} · change`));
   return out;
+}
+
+// ---------- adaptive coach ----------
+function coachCard(prog, a, plan, sugg, next, auto) {
+  const ad = G().adapt;
+  const today = dayKey();
+  const save = async () => { await ctx.commit(); };
+  if (!ad.on) {
+    return h('article', { class: 'card coach off' }, h('div', { class: 'row' },
+      h('span', { class: 'grow muted small' }, 'Adaptive coach is off: the plan is shown exactly as written.'),
+      h('button', { class: 'link small', onclick: async () => { ad.on = true; await save(); } }, 'Turn on')));
+  }
+  const lines = [];
+  if (auto && next.reason) {
+    lines.push(h('li', {}, h('span', { class: 'grow' }, next.reason),
+      h('button', { class: 'link small', onclick: () => { pdayIndex = (next.idx + 1) % prog.days.length; ctx.render(); } }, 'Do the next day')));
+  }
+  for (const c of plan.changes) {
+    lines.push(h('li', {}, h('span', { class: 'grow' }, c.text),
+      c.key === 'removed'
+        ? h('button', { class: 'link small', onclick: async () => { ad.removed = []; await save(); } }, 'Restore all')
+        : c.key === 'easy' ? null
+          : h('button', { class: 'link small', onclick: async () => { ad.ignore[c.key] = today; if (c.key === 'time') ad.minutes = null; await save(); } }, 'Undo for today')));
+  }
+  for (const sg of sugg) {
+    if (sg.type === 'skip') {
+      const ex = EX_BY_ID[sg.id]; const alt = sg.alt && EX_BY_ID[sg.alt];
+      lines.push(h('li', { class: 'suggest' }, h('span', { class: 'grow' }, sg.text, ' Want to change it?'),
+        h('span', { class: 'row wrap' },
+          alt ? h('button', { class: 'btn ghost small-btn', onclick: async () => { ad.swaps[sg.id] = sg.alt; await save(); toast(`${ex.name} → ${alt.name}`); } }, `Swap for ${alt.name}`) : null,
+          h('button', { class: 'btn ghost small-btn', onclick: async () => { ad.removed.push(sg.id); await save(); } }, 'Remove it'),
+          h('button', { class: 'link small', onclick: async () => { ad.dismissed.push(sg.key); await save(); } }, 'Keep it'))));
+    } else if (sg.type === 'program') {
+      lines.push(h('li', { class: 'suggest' }, h('span', { class: 'grow' }, sg.text),
+        h('span', { class: 'row wrap' },
+          h('button', { class: 'btn ghost small-btn', onclick: async () => { G().program = sg.to; pdayIndex = null; ad.swaps = {}; ad.removed = []; await save(); toast('Switched to Full body'); } }, 'Switch to Full body'),
+          h('button', { class: 'link small', onclick: async () => { ad.dismissed.push(sg.key); await save(); } }, 'Not now'))));
+    }
+  }
+  const swaps = Object.entries(ad.swaps);
+  if (swaps.length) {
+    lines.push(h('li', {}, h('span', { class: 'grow muted' }, `Your swaps: ${swaps.map(([f, t]) => `${EX_BY_ID[f].name} → ${EX_BY_ID[t].name}`).join(', ')}`),
+      h('button', { class: 'link small', onclick: async () => { ad.swaps = {}; await save(); } }, 'Undo swaps')));
+  }
+  const stats = a.sessions.length
+    ? `Based on ${a.sessions.length} workout${a.sessions.length > 1 ? 's' : ''}${a.completionAvg !== null ? ` · finished ${Math.round(a.completionAvg * 100)}% of the last ${Math.min(3, a.sessions.length)}` : ''}${a.typicalMinutes ? ` · usually ~${Math.round(a.typicalMinutes)} min` : ''}${a.perWeek !== null && a.weeksOfData >= 2 ? ` · ${a.perWeek.toFixed(1)} days/week` : ''}`
+    : 'The coach learns from your workouts: how long you train, what you finish, what you skip and how it feels.';
+  return h('article', { class: 'card coach' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Your coach'),
+      h('button', { class: 'link small', onclick: async () => { ad.on = false; await save(); } }, 'Turn off')),
+    lines.length ? h('ul', { class: 'coach-list' }, ...lines) : h('p', { class: 'muted small' }, 'Nothing to change today: the plan fits how you’ve been training.'),
+    h('div', { class: 'time-row' }, h('span', { class: 'muted small' }, 'Time today'),
+      h('div', { class: 'chips' }, ...[[null, 'Auto'], [30, '30'], [45, '45'], [60, '60'], [90, '90 min']].map(([v, l]) => h('button', {
+        class: `chip small${ad.minutes === v ? ' on' : ''}`, onclick: async () => { ad.minutes = v; delete ad.ignore.time; await save(); },
+      }, l)))),
+    h('p', { class: 'muted small' }, stats));
+}
+
+function finishWorkout(pday, plannedSets) {
+  const today = dayKey();
+  const done = G().log.filter((x) => x.day === today && x.pday === pday).length;
+  return modal((close) => h('div', { class: 'sheet-body' },
+    h('h2', {}, done >= plannedSets ? 'Workout complete 💪' : 'Good work today'),
+    h('p', {}, `${done} of ${plannedSets} planned sets${done < plannedSets ? '. Stopping early is fine: the coach adjusts the next plans to how you really train.' : '.'}`),
+    h('p', { class: 'muted small' }, 'How did it feel? (helps the coach set the next workouts)'),
+    h('div', { class: 'feel' }, ...[['easy', '😌', 'Easy'], ['good', '🙂', 'Good'], ['hard', '😤', 'Hard'], ['too-much', '🥵', 'Too much']].map(([k, e, l]) => h('button', {
+      class: 'feel-btn', type: 'button',
+      onclick: async () => {
+        G().sessions = G().sessions.filter((x) => !(x.day === today && x.pday === pday));
+        G().sessions.push({ day: today, pday, rating: k });
+        close(k); await ctx.commit(); toast('Saved. See you next time!');
+      },
+    }, h('span', { class: 'feel-emoji', 'aria-hidden': 'true' }, e), l))),
+    h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => close(null) }, 'Skip'))));
 }
 
 // ---------- LIBRARY ----------
@@ -11526,7 +11833,7 @@ function viewSettings() {
         h('li', {}, 'Barcode scanning happens on the phone. Camera images are never saved or sent.'),
         h('li', {}, 'Works fully offline once opened.'),
         h('li', {}, 'With a passcode, data is encrypted at rest and hidden in the app switcher.'))),
-    h('p', { class: 'muted small center' }, 'Pocket Stats v1.5'));
+    h('p', { class: 'muted small center' }, 'Pocket Stats v1.6'));
 }
 
 // Context handed to the Food tab so it can read and save shared state.
