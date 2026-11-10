@@ -180,7 +180,8 @@ def main():
         'foods': foods,
     }
     dest = ROOT / 'data' / 'foods-morocco.json'
-    dest.write_text(json.dumps(out, ensure_ascii=False, separators=(',', ':')))
+    # Drop broken characters (U+FFFD) that a few contributor-entered texts contain
+    dest.write_text(json.dumps(out, ensure_ascii=False, separators=(',', ':')).replace('\ufffd', ''))
     print(f'Wrote {dest.relative_to(ROOT)}: {len(foods)} foods, {dest.stat().st_size / 1024:.0f} KB', file=sys.stderr)
 
 
