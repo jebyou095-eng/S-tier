@@ -8,3 +8,6 @@ android/app/assets/
 # Python caches
 __pycache__/
 *.pyc
+
+# Copy of the food list published with the web link (source: data/)
+dist/data/
