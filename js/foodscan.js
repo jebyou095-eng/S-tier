@@ -117,6 +117,7 @@ export function learn(rec, food, prints) {
   const next = {
     food: { id: food.id, name: food.name, brand: food.brand || '', source: food.source, n: food.n, serving: food.serving, servingLabel: food.servingLabel, emoji: food.emoji || '', img: food.img || '' },
     prints: [...(rec?.prints || []), ...prints.map(quantize)].slice(-MAX_PER_FOOD),
+    sizes: rec?.sizes || [],
     lastGrams: rec?.lastGrams || null,
     updated: Date.now(),
   };
@@ -162,3 +163,70 @@ export function confidence(score, margin = 1) {
   if (margin < 0.04) i += 1;
   return LEVELS[i] || null;
 }
+
+// ---------- portion size from the scan ----------
+// The scan circle is the ruler: you fit the plate or bowl inside it, so every scan of a
+// plate is at the same scale. The outer ring of the circle shows the plate (its colour is
+// measured there); inside, pixels that differ clearly from the plate count as food.
+// coverage = share of the plate covered by food (0–1).
+
+/** Fraction of the plate covered by food in one square view (canvas). */
+export function plateCoverage(canvas) {
+  const size = canvas.width;
+  const { data } = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, size, size);
+  const c = (size - 1) / 2; const R = size / 2;
+  const rim = [];
+  for (let y = 0; y < size; y += 2) {
+    for (let x = 0; x < size; x += 2) {
+      const r = Math.hypot(x - c, y - c) / R;
+      if (r > 0.86 && r < 0.98) { const i = (y * size + x) * 4; rim.push([data[i], data[i + 1], data[i + 2]]); }
+    }
+  }
+  if (!rim.length) return null;
+  const mean = [0, 1, 2].map((k) => rim.reduce((t, p) => t + p[k], 0) / rim.length);
+  const spread = Math.sqrt(rim.reduce((t, p) => t + (p[0] - mean[0]) ** 2 + (p[1] - mean[1]) ** 2 + (p[2] - mean[2]) ** 2, 0) / rim.length);
+  const threshold = Math.max(40, 2.5 * spread);
+  let inside = 0; let food = 0;
+  for (let y = 0; y < size; y += 2) {
+    for (let x = 0; x < size; x += 2) {
+      if (Math.hypot(x - c, y - c) / R >= 0.84) continue;
+      const i = (y * size + x) * 4;
+      inside++;
+      if (Math.hypot(data[i] - mean[0], data[i + 1] - mean[1], data[i + 2] - mean[2]) > threshold) food++;
+    }
+  }
+  return inside ? food / inside : null;
+}
+
+const median = (a) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+/** Remember that this much plate coverage was this many grams (keeps the last 12). */
+export function addSize(rec, coverage, grams) {
+  if (!(coverage > 0.03 && coverage < 0.97) || !(grams > 0)) return rec;
+  return { ...rec, sizes: [...(rec.sizes || []), { c: +coverage.toFixed(3), g: Math.round(grams) }].slice(-12) };
+}
+
+/**
+ * Grams for a new scan of a food you've logged before: grams grow with coverage^b. With
+ * portions at clearly different sizes the app fits b for this food (flat foods like msemen
+ * grow ~linearly, piled foods faster); otherwise it uses 1.2. Limited to 1/3–3× your usual.
+ */
+export function estimateGrams(rec, coverage) {
+  const s = (rec?.sizes || []).filter((x) => x.c > 0.03 && x.g > 0);
+  if (!s.length || !(coverage > 0.03)) return null;
+  let b = 1.2;
+  const cs = s.map((x) => x.c);
+  if (s.length >= 2 && Math.max(...cs) / Math.min(...cs) > 1.3) {
+    const lx = s.map((x) => Math.log(x.c)); const ly = s.map((x) => Math.log(x.g));
+    const mx = lx.reduce((t, v) => t + v, 0) / lx.length; const my = ly.reduce((t, v) => t + v, 0) / ly.length;
+    let num = 0; let den = 0;
+    for (let i = 0; i < lx.length; i++) { num += (lx[i] - mx) * (ly[i] - my); den += (lx[i] - mx) ** 2; }
+    if (den > 0) b = Math.min(1.6, Math.max(0.8, num / den));
+  }
+  const k = median(s.map((x) => x.g / x.c ** b));
+  const usual = median(s.map((x) => x.g));
+  const est = Math.min(usual * 3, Math.max(usual / 3, k * coverage ** b));
+  return { grams: Math.max(5, Math.round(est / 5) * 5), basedOn: s.length, exponent: +b.toFixed(2) };
+}
+
+export const medianOf = median;

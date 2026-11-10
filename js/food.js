@@ -9,7 +9,7 @@ import {
 import { scanBarcode, canonicalBarcode } from './scanner.js';
 import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients } from './fooddb.js';
 import { recognizeFood, recognitionMode, preparePhoto, RecognitionError } from './recognize.js';
-import { prepareScanner, fingerprint, learn, match, confidence } from './foodscan.js';
+import { prepareScanner, fingerprint, learn, match, confidence, plateCoverage, addSize, estimateGrams, medianOf } from './foodscan.js';
 
 const MEALS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' };
 const k0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
@@ -76,7 +76,8 @@ export function normalizeFood(raw) {
     for (const [k, r] of Object.entries(raw.scans).slice(0, 500)) {
       const food = cleanFood(r?.food);
       const prints = (Array.isArray(r?.prints) ? r.prints : []).filter((p) => Number.isFinite(+p?.s) && typeof p?.q === 'string' && p.q.length <= 2400).slice(-40);
-      if (food && prints.length) out.scans[String(k).slice(0, 60)] = { food, prints, lastGrams: num(r.lastGrams, 1, 5000), updated: Number.isFinite(+r.updated) ? +r.updated : 0 };
+      const sizes = (Array.isArray(r?.sizes) ? r.sizes : []).filter((x) => num(x?.c, 0.01, 1) && num(x?.g, 1, 5000)).slice(-12).map((x) => ({ c: +x.c, g: +x.g }));
+      if (food && prints.length) out.scans[String(k).slice(0, 60)] = { food, prints, sizes, lastGrams: num(r.lastGrams, 1, 5000), updated: Number.isFinite(+r.updated) ? +r.updated : 0 };
     }
   }
   if (raw.myPhotos && typeof raw.myPhotos === 'object') {
@@ -188,7 +189,7 @@ async function addMyPhoto(food, box) {
   input.click();
 }
 
-function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel } = {}) {
+function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note } = {}) {
   return modal((done) => {
     const mult = {};
     const hasRecipe = Array.isArray(food.ing) && food.ing.length && food.ing.every(([id]) => ingredientInfo(id));
@@ -251,10 +252,11 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel } = {}
         h('button', { type: 'button', class: 'link small', onclick: () => addMyPhoto(food, thumb) }, F().myPhotos[food.id] ? '📷 Change photo' : '📷 Add photo')),
       h('div', { class: 'grow-wrap' },
         h('h2', {}, food.name),
-        food.fr || food.ar ? h('p', { class: 'muted small' }, food.fr || '', food.ar ? h('span', { lang: 'ar', dir: 'rtl' }, ` · ${food.ar}`) : null) : null,
+        food.fr || food.ar ? h('p', { class: 'muted small' }, food.fr || '', food.fr && food.ar ? ' · ' : '', food.ar ? h('bdi', { lang: 'ar' }, food.ar) : null) : null,
         h('p', { class: 'muted small' }, food.brand ? `${food.brand} · ` : '', food.qty ? `${food.qty} · ` : '', sourceBadge(food),
           food.where ? ` · ${WHERE_LABEL[food.where] || ''}` : ''))),
     h('p', { class: 'muted small' }, `Per 100 g: ${macroLine(food.n)}`),
+    note ? h('p', { class: 'tip small' }, '📏 ', note) : null,
     h('div', { class: 'chips' }, ...quick),
     h('div', { class: 'row' }, h('label', { class: 'field grow' }, h('span', {}, 'Grams'), grams), h('label', { class: 'field grow' }, h('span', {}, 'Meal'), meal)),
     preview,
@@ -338,7 +340,7 @@ function resultRow(food, onPick) {
       foodThumb(food, { photos: photosOn(), userPhoto: F().myPhotos[food.id] }),
       h('span', { class: 'r-text' },
         h('span', { class: 'r-name' }, food.name, food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null,
-          food.ar ? h('span', { class: 'r-ar', lang: 'ar', dir: 'rtl' }, ` ${food.ar}`) : null),
+          food.ar ? h('bdi', { class: 'r-ar', lang: 'ar' }, food.ar) : null),
         h('span', { class: 'r-meta' }, sourceBadge(food), food.where ? ` ${WHERE_LABEL[food.where] || ''} ·` : '', ` ${k0.format(food.n.kcal)} kcal · ${k1.format(food.n.p)} g protein /100 g`))));
 }
 
@@ -609,15 +611,18 @@ function captureScan() {
 
     startBtn.addEventListener('click', async () => {
       startBtn.disabled = true;
-      const prints = []; let thumb = ''; let blob = null;
+      const prints = []; const covers = []; let thumb = ''; let blob = null;
       for (let i = 0; i < FRAMES && running; i++) {
         status.textContent = i < FRAMES / 2 ? 'Move slowly to the left around the food…' : '…and now slowly to the right';
-        prints.push(fingerprint(snap(video, 224)));
+        const view = snap(video, 224);
+        prints.push(fingerprint(view));
+        const cov = plateCoverage(view);
+        if (cov !== null) covers.push(cov);
         if (i === Math.floor(FRAMES / 2)) { thumb = snap(video, 160).toDataURL('image/jpeg', 0.75); snap(video, 768); blob = await toBlob(); }
         bar.firstChild.style.setProperty('width', `${((i + 1) / FRAMES) * 100}%`);
         await new Promise((r) => setTimeout(r, 280));
       }
-      if (running) { navigator.vibrate?.(60); finish({ prints, thumb, blob }); }
+      if (running) { navigator.vibrate?.(60); finish({ prints, thumb, blob, coverage: covers.length ? medianOf(covers) : null }); }
     });
 
     photos.addEventListener('change', async () => {
@@ -626,15 +631,18 @@ function captureScan() {
       status.textContent = 'Reading photos…';
       try {
         await prepareScanner((t) => { status.textContent = t; });
-        const prints = []; let thumb = ''; let blob = null;
+        const prints = []; const covers = []; let thumb = ''; let blob = null;
         for (const f of files) {
           const url = URL.createObjectURL(f);
           const img = new Image(); img.src = url; await img.decode();
-          prints.push(fingerprint(snap(img, 224)));
+          const view = snap(img, 224);
+          prints.push(fingerprint(view));
+          const cov = plateCoverage(view);
+          if (cov !== null) covers.push(cov);
           if (!thumb) { thumb = snap(img, 160).toDataURL('image/jpeg', 0.75); snap(img, 768); blob = await toBlob(); }
           URL.revokeObjectURL(url);
         }
-        finish({ prints, thumb, blob });
+        finish({ prints, thumb, blob, coverage: covers.length ? medianOf(covers) : null });
       } catch {
         status.textContent = "Couldn't read those photos.";
       }
@@ -673,7 +681,7 @@ function captureScan() {
       if (!running) { stream.getTracks().forEach((t) => t.stop()); return; }
       video.srcObject = stream;
       await video.play().catch(() => {});
-      status.textContent = 'Put the food inside the circle, then press Start and move slowly around it.';
+      status.textContent = 'Fit the plate or bowl inside the circle, then press Start and move slowly around it. The circle is the ruler for the portion size.';
       startBtn.disabled = false;
     })();
   });
@@ -692,11 +700,19 @@ function scanResultsDialog(scan, ranked) {
       h('button', { class: 'result with-thumb', type: 'button', onclick: () => done({ type: 'match', id: r.id }) },
         foodThumb(r.rec.food, { photos: photosOn(), userPhoto: F().myPhotos[r.rec.food.id] }),
         h('span', { class: 'r-text' }, h('span', { class: 'r-name' }, r.rec.food.name),
-          h('span', { class: 'r-meta' }, h('span', { class: `conf conf-${r.conf.level}` }, r.conf.label), ` · ${Math.round(r.score * 100)}% similar · taught ${r.rec.prints.length} views`)))))) : null,
+          h('span', { class: 'r-meta' }, h('span', { class: `conf conf-${r.conf.level}` }, r.conf.label), ` · ${Math.round(r.score * 100)}% similar`,
+            (() => { const e = portionFromScan(r.rec, scan); return e ? h('strong', { class: 'r-portion' }, ` · ≈ ${e.grams} g`) : ''; })())))))) : null,
+    scan.coverage !== null && scan.coverage !== undefined ? h('p', { class: 'muted small' }, `Food covers about ${Math.round(scan.coverage * 100)}% of the plate.`) : null,
     h('div', { class: 'stack' },
       h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'link' }) }, shown.length ? '🔗 No: link it to another food' : '🔗 Link this scan to a food'),
       F().ai ? h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'claude' }) }, '📸 Ask Claude what it is (sends this photo)') : null,
       h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, 'Cancel'))));
+}
+
+/** Grams estimated from this scan's plate coverage, for foods you've logged before (not packaged products). */
+function portionFromScan(rec, scan) {
+  if (!rec || rec.food?.source === 'Open Food Facts' || !(scan.coverage > 0.03)) return null;
+  return estimateGrams(rec, scan.coverage);
 }
 
 function pickOneDialog(items) {
@@ -706,10 +722,21 @@ function pickOneDialog(items) {
     h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, 'Cancel'))));
 }
 
-async function teachAndLog(food, scan, meal, gramsHint) {
-  const r = await portionDialog(food, { meal, grams: gramsHint || undefined, okLabel: 'Log & remember' });
+async function teachAndLog(food, scan, meal, claudeGrams) {
+  const prev = F().scans[food.id];
+  const est = portionFromScan(prev, scan);
+  const grams = claudeGrams || est?.grams || prev?.lastGrams || undefined;
+  const pct = scan.coverage > 0.03 ? `food covers about ${Math.round(scan.coverage * 100)}% of the plate` : '';
+  const note = est
+    ? `≈ ${est.grams} g from your scan (${pct}; based on ${est.basedOn} earlier portion${est.basedOn > 1 ? 's' : ''}). Adjust if needed: the app learns from what you log.`
+    : claudeGrams ? `${claudeGrams} g is Claude’s estimate. Correct it if needed: the app learns portion sizes from what you log.`
+      : food.source === 'Open Food Facts' ? null
+        : pct ? `First portion for this food: enter the grams once (${pct}), and future scans will estimate it.` : null;
+  const r = await portionDialog(food, { meal, grams, okLabel: 'Log & remember', note });
   if (!r || r === 'delete') return;
-  const rec = learn(F().scans[food.id], food, scan.prints);
+  let rec = learn(prev, food, scan.prints);
+  rec.sizes = prev?.sizes || [];
+  if (food.source !== 'Open Food Facts') rec = addSize(rec, scan.coverage, r.grams);
   rec.lastGrams = r.grams;
   F().scans[food.id] = rec;
   if (scan.thumb && !F().myPhotos[food.id] && !food.img) { F().myPhotos[food.id] = scan.thumb; await ctx.savePhoto(food.id, scan.thumb); }
@@ -726,7 +753,7 @@ async function scanTeachFlow(meal = defaultMeal()) {
   if (choice.type === 'match') {
     const rec = F().scans[choice.id];
     const fresh = foodDb().find((f) => f.id === rec.food.id) || rec.food; // latest values if it's from the food list
-    return teachAndLog(fresh, scan, meal, rec.lastGrams);
+    return teachAndLog(fresh, scan, meal); // grams: estimated from the scan, else your usual portion
   }
   if (choice.type === 'link') {
     let food = await searchDialog(meal);
@@ -800,6 +827,27 @@ async function editEntry(e) {
   if (r === 'delete') F().log = F().log.filter((x) => x !== e);
   else { e.grams = r.grams; e.meal = r.meal; }
   await ctx.commit();
+}
+
+// ---------- icons (one consistent line style) ----------
+const ICONS = {
+  scan: 'M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 13.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
+  barcode: 'M4 6v12M7 6v12M10.5 6v12M13 6v12M16.5 6v12M20 6v12',
+  search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM20 20l-4.8-4.8',
+  star: 'M12 3l2.7 2.7h3.6v3.6L21 12l-2.7 2.7v3.6h-3.6L12 21l-2.7-2.7H5.7v-3.6L3 12l2.7-2.7V5.7h3.6z',
+  camera: 'M4 8.5h3.2l1.6-2.5h6.4l1.6 2.5H20V19H4zM12 16.5a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z',
+  label: 'M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8zM14 3v5h5M8.5 12.5h7M8.5 16h5',
+};
+
+function lineIcon(d) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', 'line-icon');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', d);
+  svg.append(p);
+  return svg;
 }
 
 // ---------- profile ----------
@@ -930,12 +978,17 @@ function viewDiary() {
       foodDay !== today ? h('button', { class: 'link', onclick: () => { foodDay = today; ctx.render(); } }, 'Back to today') : null),
     h('button', { class: 'icon-btn', 'aria-label': 'Next day', disabled: foodDay >= today, onclick: () => { foodDay = addDays(foodDay, 1); ctx.render(); } }, '›'));
 
-  const actions = h('div', { class: 'scan-actions' },
-    h('button', { class: 'btn primary big-btn', onclick: scanFlow }, h('span', { 'aria-hidden': 'true' }, '▥ '), 'Scan barcode'),
-    h('button', { class: 'btn ghost big-btn', onclick: () => searchFlow() }, h('span', { 'aria-hidden': 'true' }, '⌕ '), 'Search food'),
-    h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => scanTeachFlow() }, h('span', { 'aria-hidden': 'true' }, '🔍 '), 'Scan & teach (on your phone)'),
-    h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => recognizeFlow() }, h('span', { 'aria-hidden': 'true' }, '📸 '), 'Recognise food from a photo'),
-    F().moroccoDb ? h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => browseFlow() }, h('span', { 'aria-hidden': 'true' }, '🇲🇦 '), 'Moroccan foods: supermarket, souk & street') : null);
+  const tile = (label, sub, path, onclick, primary) => h('button', { class: `add-tile${primary ? ' primary' : ''}`, type: 'button', onclick },
+    lineIcon(path), h('span', { class: 'add-label' }, label), h('span', { class: 'add-sub' }, sub));
+  const actions = h('article', { class: 'card add-food' },
+    h('h2', {}, 'Add food'),
+    h('div', { class: 'add-grid' },
+      tile('Scan food', 'learns your plates', ICONS.scan, () => scanTeachFlow(), true),
+      tile('Barcode', 'packaged products', ICONS.barcode, scanFlow),
+      tile('Search', 'name or Darija', ICONS.search, () => searchFlow()),
+      F().moroccoDb ? tile('Moroccan', 'souk, street, shops', ICONS.star, () => browseFlow()) : null,
+      tile('Ask Claude', 'from a photo', ICONS.camera, () => recognizeFlow()),
+      tile('From label', 'type the numbers', ICONS.label, async () => pickAndLog(await labelDialog()))));
 
   const setup = !p ? h('article', { class: 'card callout' },
     h('h2', {}, 'Set your goal'),
@@ -1125,7 +1178,7 @@ export function foodSettingsCard(c) {
     h('h3', {}, 'Foods you’ve taught the scanner'),
     Object.keys(F().scans).length ? h('ul', { class: 'entries' }, ...Object.entries(F().scans).sort((a, b) => b[1].updated - a[1].updated).map(([id, rec]) => h('li', {},
       foodThumb(rec.food, { userPhoto: F().myPhotos[id] }),
-      h('span', { class: 'grow' }, rec.food.name, h('span', { class: 'muted small block' }, `${rec.prints.length} views${rec.lastGrams ? ` · usually ${k0.format(rec.lastGrams)} g` : ''}`)),
+      h('span', { class: 'grow' }, rec.food.name, h('span', { class: 'muted small block' }, `${rec.prints.length} views${rec.sizes?.length ? ` · ${rec.sizes.length} portion${rec.sizes.length > 1 ? 's' : ''} learned` : ''}${rec.lastGrams ? ` · usually ${k0.format(rec.lastGrams)} g` : ''}`)),
       h('button', {
         class: 'icon-btn small', 'aria-label': `Forget ${rec.food.name}`, onclick: async () => {
           if (!await confirmDialog(`Forget ${rec.food.name}?`, 'The scanner will no longer recognise it. Your diary is not affected.', 'Forget', true)) return;

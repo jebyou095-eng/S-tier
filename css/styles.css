@@ -508,3 +508,24 @@ dialog.scanner::backdrop { background: #000; }
 .scan-progress { height: 8px; background: rgb(255 255 255 / 0.2); }
 .scan-progress > div { background: #fff; }
 .scan-panel .btn.primary { width: 100%; }
+
+/* ---------- Add food grid (tidy actions) ---------- */
+.add-food h2 { margin-bottom: 10px; }
+.add-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.add-tile {
+  display: grid; justify-items: center; align-content: center; gap: 3px;
+  min-height: 92px; padding: 10px 6px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  cursor: pointer; text-align: center; font: inherit;
+}
+.add-tile:active { transform: scale(0.97); }
+.add-tile .line-icon { width: 26px; height: 26px; fill: none; stroke: var(--accent); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 2px; }
+.add-tile.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.add-tile.primary .line-icon { stroke: var(--accent-text); }
+.add-label { font-weight: 700; font-size: 0.9rem; line-height: 1.15; }
+.add-sub { font-size: 0.68rem; line-height: 1.2; opacity: 0.75; }
+.r-portion { color: var(--text); }
+/* compact meal cards when empty */
+.meal { padding: 12px 16px; }
+.meal .tracker-head { margin-bottom: 0; }
+.meal .entries { margin-top: 6px; }
