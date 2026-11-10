@@ -4,11 +4,26 @@
 // Nothing about you is sent: GitHub only sees that the public list or a photo was requested.
 import { cacheGet, cacheSet } from './db.js';
 
-const REPO = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/HEAD/data/';
+const RAW = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/';
+const LATEST = 'https://api.github.com/repos/jebyou095-eng/S-tier/commits/HEAD';
 const HOSTED = !!globalThis.POCKET_STATS_HOSTED;
-const BASE = HOSTED ? 'data/' : REPO; // web-link version ships the list next to the page
-const MAX_AGE = 7 * 24 * 3600 * 1000;
+const MAX_AGE = 24 * 3600 * 1000; // check for a new version once a day (cheap: one tiny request)
+// Files are read by exact commit id: GitHub's CDN can serve a stale copy of the 'HEAD' alias for a long time.
+let ref = 'HEAD';
+const base = () => (HOSTED ? 'data/' : `${RAW}${ref}/data/`); // web-link version ships the list next to the page
 
+/** The repo's current commit id, or null. */
+async function latestCommit() {
+  try {
+    const r = await fetch(LATEST, { ...FETCH, headers: { Accept: 'application/vnd.github.sha' } });
+    const sha = r.ok ? (await r.text()).trim() : '';
+    return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
+
+const FETCH = { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' };
 let foods = [];
 let ingredientTable = {};
 let byCode = new Map();
@@ -16,7 +31,7 @@ let meta = { version: null, fetched: 0, attribution: '', where: {} };
 let loading = null;
 const listeners = new Set();
 
-const FETCH = { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' };
+
 
 function adopt(json, fetched) {
   const list = Array.isArray(json?.foods) ? json.foods : [];
@@ -50,16 +65,26 @@ export function loadFoodDb({ force = false, allowNetwork = true } = {}) {
   loading = (async () => {
     let cached = null;
     try { cached = await cacheGet('fooddb'); } catch { /* storage unavailable */ }
+    if (cached?.ref) ref = cached.ref;
     if (cached && !foods.length) adopt(cached.json, cached.fetched);
     const stale = !cached || Date.now() - cached.fetched > MAX_AGE;
     if (allowNetwork && (force || stale)) {
       try {
-        const r = await fetch(`${BASE}foods-morocco.json`, FETCH);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const json = await r.json();
-        const fetched = Date.now();
-        adopt(json, fetched);
-        try { await cacheSet('fooddb', { json, fetched }); } catch { /* ignore */ }
+        const sha = HOSTED ? null : await latestCommit();
+        if (sha && cached?.ref === sha && foods.length) {
+          // Nothing changed in the repo: keep the copy on the phone, just note that we checked.
+          try { await cacheSet('fooddb', { ...cached, fetched: Date.now() }); } catch { /* ignore */ }
+          meta.fetched = Date.now();
+        } else {
+          const useRef = sha || 'HEAD';
+          const r = await fetch(`${HOSTED ? 'data/' : `${RAW}${useRef}/data/`}foods-morocco.json`, FETCH);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const json = await r.json();
+          const fetched = Date.now();
+          ref = useRef;
+          adopt(json, fetched);
+          try { await cacheSet('fooddb', { json, fetched, ref: useRef }); } catch { /* ignore */ }
+        }
       } catch (err) {
         if (!foods.length) throw err;
       }
@@ -89,7 +114,7 @@ async function photoUrl(path) {
   let blob = null;
   try { blob = await cacheGet(`img:${path}`); } catch { /* ignore */ }
   if (!blob) {
-    const r = await fetch(`${BASE}${path}`, FETCH);
+    const r = await fetch(`${base()}${path}`, FETCH);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     blob = await r.blob();
     if (!/^image\//.test(blob.type) && blob.type) throw new Error('not an image');
