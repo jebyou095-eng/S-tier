@@ -9,6 +9,7 @@ import {
 import { scanBarcode, canonicalBarcode } from './scanner.js';
 import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients } from './fooddb.js';
 import { recognizeFood, recognitionMode, preparePhoto, RecognitionError } from './recognize.js';
+import { prepareScanner, fingerprint, learn, match, confidence } from './foodscan.js';
 
 const MEALS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' };
 const k0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
@@ -23,7 +24,7 @@ const F = () => ctx.state.food;
 
 // ---------- data ----------
 export function freshFood() {
-  return { profile: null, log: [], saved: [], online: false, usdaKey: '', moroccoDb: true, photos: true, myPhotos: {}, ai: false, aiKey: '' };
+  return { profile: null, log: [], saved: [], online: false, usdaKey: '', moroccoDb: true, photos: true, myPhotos: {}, scans: {}, ai: false, aiKey: '' };
 }
 
 const num = (x, lo, hi) => (Number.isFinite(+x) && +x >= lo && +x <= hi ? +x : null);
@@ -70,6 +71,14 @@ export function normalizeFood(raw) {
   out.photos = raw.photos !== false;
   out.ai = raw.ai === true;
   out.aiKey = typeof raw.aiKey === 'string' && /^[\w-]{0,200}$/.test(raw.aiKey) ? raw.aiKey : '';
+  // Learned food scans (only present in memory and in backups; stored as separate records)
+  if (raw.scans && typeof raw.scans === 'object') {
+    for (const [k, r] of Object.entries(raw.scans).slice(0, 500)) {
+      const food = cleanFood(r?.food);
+      const prints = (Array.isArray(r?.prints) ? r.prints : []).filter((p) => Number.isFinite(+p?.s) && typeof p?.q === 'string' && p.q.length <= 2400).slice(-40);
+      if (food && prints.length) out.scans[String(k).slice(0, 60)] = { food, prints, lastGrams: num(r.lastGrams, 1, 5000), updated: Number.isFinite(+r.updated) ? +r.updated : 0 };
+    }
+  }
   if (raw.myPhotos && typeof raw.myPhotos === 'object') {
     for (const [k, v] of Object.entries(raw.myPhotos).slice(0, 300)) {
       if (typeof v === 'string' && v.startsWith('data:image/jpeg;base64,') && v.length < 200000) out.myPhotos[String(k).slice(0, 60)] = v;
@@ -568,6 +577,182 @@ async function recognizeFlow(meal = defaultMeal()) {
   toast(`Logged ${chosen.length} item${chosen.length > 1 ? 's' : ''}`);
 }
 
+// ---------- Scan & teach: on-device visual memory of your foods ----------
+const FRAMES = 10;
+
+/** Full-screen multi-view capture. Resolves {prints, thumb, blob} or null. */
+function captureScan() {
+  return new Promise((resolve) => {
+    let stream = null; let running = true;
+    const video = h('video', { playsinline: true, muted: true, autoplay: true, class: 'scan-video' });
+    const status = h('p', { class: 'scan-status' }, 'Starting camera…');
+    const bar = h('div', { class: 'progress scan-progress' }, h('div', { css: { width: '0%' } }));
+    const startBtn = h('button', { class: 'btn primary big-btn', type: 'button', disabled: true }, 'Start scan');
+    const photos = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+    const dlg = h('dialog', { class: 'scanner' });
+    const finish = (val) => {
+      running = false;
+      stream?.getTracks().forEach((t) => t.stop());
+      dlg.close(); dlg.remove();
+      resolve(val);
+    };
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); finish(null); });
+    const canvas = document.createElement('canvas');
+    const snap = (src, size) => {
+      const w = src.videoWidth || src.naturalWidth; const hgt = src.videoHeight || src.naturalHeight;
+      const side = Math.min(w, hgt);
+      canvas.width = size; canvas.height = size;
+      canvas.getContext('2d').drawImage(src, (w - side) / 2, (hgt - side) / 2, side, side, 0, 0, size, size);
+      return canvas;
+    };
+    const toBlob = () => new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      const prints = []; let thumb = ''; let blob = null;
+      for (let i = 0; i < FRAMES && running; i++) {
+        status.textContent = i < FRAMES / 2 ? 'Move slowly to the left around the food…' : '…and now slowly to the right';
+        prints.push(fingerprint(snap(video, 224)));
+        if (i === Math.floor(FRAMES / 2)) { thumb = snap(video, 160).toDataURL('image/jpeg', 0.75); snap(video, 768); blob = await toBlob(); }
+        bar.firstChild.style.setProperty('width', `${((i + 1) / FRAMES) * 100}%`);
+        await new Promise((r) => setTimeout(r, 280));
+      }
+      if (running) { navigator.vibrate?.(60); finish({ prints, thumb, blob }); }
+    });
+
+    photos.addEventListener('change', async () => {
+      const files = [...photos.files].slice(0, 6);
+      if (!files.length) return;
+      status.textContent = 'Reading photos…';
+      try {
+        await prepareScanner((t) => { status.textContent = t; });
+        const prints = []; let thumb = ''; let blob = null;
+        for (const f of files) {
+          const url = URL.createObjectURL(f);
+          const img = new Image(); img.src = url; await img.decode();
+          prints.push(fingerprint(snap(img, 224)));
+          if (!thumb) { thumb = snap(img, 160).toDataURL('image/jpeg', 0.75); snap(img, 768); blob = await toBlob(); }
+          URL.revokeObjectURL(url);
+        }
+        finish({ prints, thumb, blob });
+      } catch {
+        status.textContent = "Couldn't read those photos.";
+      }
+    });
+
+    dlg.append(
+      h('div', { class: 'scan-view' }, video, h('div', { class: 'scan-ring', 'aria-hidden': 'true' })),
+      h('div', { class: 'scan-panel' },
+        status, bar,
+        startBtn,
+        h('div', { class: 'row' },
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => photos.click() }, '🖼 Use photos instead'),
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => finish(null) }, 'Cancel')),
+        photos),
+    );
+    document.body.append(dlg);
+    dlg.showModal();
+
+    (async () => {
+      try {
+        await prepareScanner((t) => { status.textContent = t; });
+      } catch {
+        status.textContent = "The scanner couldn't load. Check your connection the first time you use it.";
+        return;
+      }
+      if (globalThis.POCKET_STATS_HOSTED || !navigator.mediaDevices?.getUserMedia) {
+        status.textContent = 'Live camera is not available here. Use photos instead (2–6 from different angles).';
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+      } catch {
+        status.textContent = 'Camera permission was denied. You can use photos instead.';
+        return;
+      }
+      if (!running) { stream.getTracks().forEach((t) => t.stop()); return; }
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      status.textContent = 'Put the food inside the circle, then press Start and move slowly around it.';
+      startBtn.disabled = false;
+    })();
+  });
+}
+
+function scanResultsDialog(scan, ranked) {
+  const lib = F().scans;
+  const shown = ranked.map((r, i) => ({ ...r, conf: confidence(r.score, r.score - (ranked[i + 1]?.score ?? 0)) })).filter((r) => r.conf).slice(0, 3);
+  return modal((done) => h('div', { class: 'sheet-body' },
+    h('div', { class: 'row' }, h('img', { src: scan.thumb, alt: 'Your scan', class: 'ai-photo' }),
+      h('div', { class: 'grow-wrap' }, h('h2', {}, shown.length ? 'Is it one of these?' : 'New food'),
+        h('p', { class: 'muted small' }, Object.keys(lib).length
+          ? `Compared with ${Object.keys(lib).length} food${Object.keys(lib).length > 1 ? 's' : ''} you've taught the app. Nothing left your phone.`
+          : 'You haven’t taught the app any foods yet. Link this scan to a food and it will recognise it next time.'))),
+    shown.length ? h('ul', { class: 'results' }, ...shown.map((r) => h('li', {},
+      h('button', { class: 'result with-thumb', type: 'button', onclick: () => done({ type: 'match', id: r.id }) },
+        foodThumb(r.rec.food, { photos: photosOn(), userPhoto: F().myPhotos[r.rec.food.id] }),
+        h('span', { class: 'r-text' }, h('span', { class: 'r-name' }, r.rec.food.name),
+          h('span', { class: 'r-meta' }, h('span', { class: `conf conf-${r.conf.level}` }, r.conf.label), ` · ${Math.round(r.score * 100)}% similar · taught ${r.rec.prints.length} views`)))))) : null,
+    h('div', { class: 'stack' },
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'link' }) }, shown.length ? '🔗 No: link it to another food' : '🔗 Link this scan to a food'),
+      F().ai ? h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'claude' }) }, '📸 Ask Claude what it is (sends this photo)') : null,
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, 'Cancel'))));
+}
+
+function pickOneDialog(items) {
+  return modal((done) => h('div', { class: 'sheet-body' },
+    h('h2', {}, 'Which one did you scan?'),
+    h('ul', { class: 'results' }, ...items.map((it) => resultRow(it.food, () => done(it)))),
+    h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, 'Cancel'))));
+}
+
+async function teachAndLog(food, scan, meal, gramsHint) {
+  const r = await portionDialog(food, { meal, grams: gramsHint || undefined, okLabel: 'Log & remember' });
+  if (!r || r === 'delete') return;
+  const rec = learn(F().scans[food.id], food, scan.prints);
+  rec.lastGrams = r.grams;
+  F().scans[food.id] = rec;
+  if (scan.thumb && !F().myPhotos[food.id] && !food.img) { F().myPhotos[food.id] = scan.thumb; await ctx.savePhoto(food.id, scan.thumb); }
+  await ctx.saveScan(food.id, rec);
+  await addEntry(r.food || food, r.grams, r.meal);
+}
+
+async function scanTeachFlow(meal = defaultMeal()) {
+  const scan = await captureScan();
+  if (!scan) return;
+  const ranked = match(F().scans, scan.prints);
+  const choice = await scanResultsDialog(scan, ranked);
+  if (!choice) return;
+  if (choice.type === 'match') {
+    const rec = F().scans[choice.id];
+    const fresh = foodDb().find((f) => f.id === rec.food.id) || rec.food; // latest values if it's from the food list
+    return teachAndLog(fresh, scan, meal, rec.lastGrams);
+  }
+  if (choice.type === 'link') {
+    let food = await searchDialog(meal);
+    if (food === 'label') food = await labelDialog();
+    if (food) return teachAndLog(food, scan, meal);
+    return;
+  }
+  if (choice.type === 'claude') {
+    if (!await ensureAi()) return;
+    const stop = busy('Claude is looking at your scan…');
+    let result;
+    try {
+      const catalog = foodDb().filter((f) => f.where && f.where !== 'supermarket').map((f) => ({ id: f.id, name: f.name, fr: f.fr }));
+      result = await recognizeFood(scan.blob, catalog, { apiKey: F().aiKey });
+    } catch (err) {
+      stop(); toast(err instanceof RecognitionError ? err.message : 'Recognition failed. Try again.'); return;
+    }
+    stop();
+    const catalogById = new Map(foodDb().map((f) => [f.id, f]));
+    const items = result.items.map((x) => ({ ...x, food: (x.catalogId && catalogById.get(x.catalogId)) || { id: `ai:${uid()}`, name: x.name, source: 'Photo estimate', n: x.n, serving: x.grams || 100, servingLabel: `${x.grams || 100} g (from photo)`, emoji: '📸' } }));
+    if (!items.length) { toast('Claude didn’t find food in this scan.'); return; }
+    const it = items.length === 1 ? items[0] : await pickOneDialog(items);
+    if (it) return teachAndLog(it.food, scan, meal, it.grams);
+  }
+}
+
 async function browseFlow(meal = defaultMeal()) {
   const food = await browseDialog(meal);
   if (food) return pickAndLog(food, meal);
@@ -748,6 +933,7 @@ function viewDiary() {
   const actions = h('div', { class: 'scan-actions' },
     h('button', { class: 'btn primary big-btn', onclick: scanFlow }, h('span', { 'aria-hidden': 'true' }, '▥ '), 'Scan barcode'),
     h('button', { class: 'btn ghost big-btn', onclick: () => searchFlow() }, h('span', { 'aria-hidden': 'true' }, '⌕ '), 'Search food'),
+    h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => scanTeachFlow() }, h('span', { 'aria-hidden': 'true' }, '🔍 '), 'Scan & teach (on your phone)'),
     h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => recognizeFlow() }, h('span', { 'aria-hidden': 'true' }, '📸 '), 'Recognise food from a photo'),
     F().moroccoDb ? h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => browseFlow() }, h('span', { 'aria-hidden': 'true' }, '🇲🇦 '), 'Moroccan foods: supermarket, souk & street') : null);
 
@@ -936,6 +1122,17 @@ export function foodSettingsCard(c) {
         F().usdaKey = v; await ctx.commit(); toast('Saved');
       },
     }, 'Save key')]),
+    h('h3', {}, 'Foods you’ve taught the scanner'),
+    Object.keys(F().scans).length ? h('ul', { class: 'entries' }, ...Object.entries(F().scans).sort((a, b) => b[1].updated - a[1].updated).map(([id, rec]) => h('li', {},
+      foodThumb(rec.food, { userPhoto: F().myPhotos[id] }),
+      h('span', { class: 'grow' }, rec.food.name, h('span', { class: 'muted small block' }, `${rec.prints.length} views${rec.lastGrams ? ` · usually ${k0.format(rec.lastGrams)} g` : ''}`)),
+      h('button', {
+        class: 'icon-btn small', 'aria-label': `Forget ${rec.food.name}`, onclick: async () => {
+          if (!await confirmDialog(`Forget ${rec.food.name}?`, 'The scanner will no longer recognise it. Your diary is not affected.', 'Forget', true)) return;
+          delete F().scans[id]; await ctx.deleteScan(id); ctx.render();
+        },
+      }, '✕'))))
+      : h('p', { class: 'muted small' }, 'None yet. Use “Scan & teach” in Food: scan a food, link it to its name, and next time the app recognises it on its own. Fingerprints stay on this phone, encrypted with your passcode.'),
     h('h3', {}, 'Photo recognition (Claude)'),
     h('label', { class: 'switch-row' },
       h('span', { class: 'grow' }, 'Recognise food from photos', h('span', { class: 'muted small block' },

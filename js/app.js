@@ -636,7 +636,7 @@ function viewSettings() {
         h('li', {}, 'Barcode scanning happens on the phone. Camera images are never saved or sent.'),
         h('li', {}, 'Works fully offline once opened.'),
         h('li', {}, 'With a passcode, data is encrypted at rest and hidden in the app switcher.'))),
-    h('p', { class: 'muted small center' }, 'Pocket Stats v1.3'));
+    h('p', { class: 'muted small center' }, 'Pocket Stats v1.4'));
 }
 
 // Context handed to the Food tab so it can read and save shared state.
@@ -646,15 +646,22 @@ function viewSettings() {
  */
 async function attachPhotos() {
   const inline = state.food.myPhotos || {};
-  const hasInline = Object.keys(inline).length > 0;
-  if (hasInline) await vault.savePhotos(inline);
+  const inlineScans = state.food.scans || {};
+  const hasInline = Object.keys(inline).length > 0 || Object.keys(inlineScans).length > 0;
+  if (hasInline) {
+    await vault.savePhotos(inline);
+    for (const [id, rec] of Object.entries(inlineScans)) await vault.saveScan(id, rec);
+  }
   state.food.myPhotos = { ...inline, ...(await vault.loadPhotos()) };
+  state.food.scans = { ...inlineScans, ...(await vault.loadScans()) };
   if (hasInline) await vault.save(state);
 }
 
 const foodCtx = {
   get state() { return state; },
   savePhoto: (id, url) => vault.savePhoto(id, url),
+  saveScan: (id, rec) => vault.saveScan(id, rec),
+  deleteScan: (id) => vault.deleteScan(id),
   commit: () => commit(),
   render: () => render(),
   save: () => vault.save(state).catch((err) => toast(`Couldn't save: ${err.message}`)),

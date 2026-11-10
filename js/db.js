@@ -102,8 +102,10 @@ export async function verify(pass) {
 }
 
 export async function save(state) {
-  // Your food photos are stored as separate records (savePhoto), so a save doesn't re-encrypt them all.
-  if (state?.food?.myPhotos && Object.keys(state.food.myPhotos).length) state = { ...state, food: { ...state.food, myPhotos: {} } };
+  // Your food photos and learned scans are stored as separate records, so a save doesn't re-encrypt them all.
+  if (state?.food && (Object.keys(state.food.myPhotos || {}).length || Object.keys(state.food.scans || {}).length)) {
+    state = { ...state, food: { ...state.food, myPhotos: {}, scans: {} } };
+  }
   if (key) {
     const { iv, ct } = await encryptObj(key, state);
     await idbSet(VAULT, { v: 1, locked: true, salt, iter: iterations, iv, ct });
@@ -113,28 +115,49 @@ export async function save(state) {
 }
 
 export async function setPasscode(pass, state) {
+  const side = await readSide(); // read photos & learned scans with the current key first
   salt = rand(16);
   iterations = ITERATIONS;
   key = await deriveKey(pass, salt, iterations);
   await save(state);
-  await savePhotos(state?.food?.myPhotos); // re-encrypt photos with the new key
+  for (const [k, v] of side) await putSide(k, v); // re-encrypt them with the new key
 }
 
 export async function removePasscode(state) {
+  const side = await readSide();
   key = null; salt = null;
   await save(state);
-  await savePhotos(state?.food?.myPhotos);
+  for (const [k, v] of side) await putSide(k, v);
 }
 
-// ---------- your food photos: one record each, encrypted like the rest ----------
-export async function savePhoto(id, dataUrl) {
+// ---------- side records: your food photos and learned food scans ----------
+// One record each (so a normal save stays small), encrypted exactly like the main record.
+const SIDE = ['photo:', 'scan:'];
+
+async function putSide(k, value) {
   if (key) {
-    const { iv, ct } = await encryptObj(key, dataUrl);
-    await idbSet(`photo:${id}`, { locked: true, iv, ct });
+    const { iv, ct } = await encryptObj(key, value);
+    await idbSet(k, { locked: true, iv, ct });
   } else {
-    await idbSet(`photo:${id}`, { locked: false, data: dataUrl });
+    await idbSet(k, { locked: false, data: value });
   }
 }
+
+async function readSide(prefixes = SIDE) {
+  const keys = await tx('readonly', (s) => s.getAllKeys());
+  const out = [];
+  for (const k of keys) {
+    if (typeof k !== 'string' || !prefixes.some((p) => k.startsWith(p))) continue;
+    const r = await idbGet(k);
+    try {
+      const v = r?.locked ? (key ? await decryptObj(key, r.iv, r.ct) : undefined) : r?.data;
+      if (v !== undefined) out.push([k, v]);
+    } catch { /* skip a damaged record */ }
+  }
+  return out;
+}
+
+export const savePhoto = (id, dataUrl) => putSide(`photo:${id}`, dataUrl);
 
 export async function savePhotos(map) {
   for (const [id, url] of Object.entries(map || {})) await savePhoto(id, url);
@@ -142,16 +165,20 @@ export async function savePhotos(map) {
 
 /** All your food photos ({food id: data URL}); needs the passcode key when locked. */
 export async function loadPhotos() {
-  const keys = await tx('readonly', (s) => s.getAllKeys());
   const out = {};
-  for (const k of keys) {
-    if (typeof k !== 'string' || !k.startsWith('photo:')) continue;
-    const r = await idbGet(k);
-    try {
-      const url = r?.locked ? (key ? await decryptObj(key, r.iv, r.ct) : null) : r?.data;
-      if (typeof url === 'string' && url.startsWith('data:image/jpeg;base64,')) out[k.slice(6)] = url;
-    } catch { /* skip a damaged record */ }
+  for (const [k, v] of await readSide(['photo:'])) {
+    if (typeof v === 'string' && v.startsWith('data:image/jpeg;base64,')) out[k.slice(6)] = v;
   }
+  return out;
+}
+
+export const saveScan = (id, rec) => putSide(`scan:${id}`, rec);
+export const deleteScan = (id) => tx('readwrite', (s) => s.delete(`scan:${id}`));
+
+/** Learned food scans ({food id: record}). */
+export async function loadScans() {
+  const out = {};
+  for (const [k, v] of await readSide(['scan:'])) if (v && typeof v === 'object') out[k.slice(5)] = v;
   return out;
 }
 

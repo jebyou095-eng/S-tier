@@ -96,6 +96,9 @@ export function loadFoodDb({ force = false, allowNetwork = true } = {}) {
 
 export const foodDb = () => foods;
 
+/** URL of a file in the repo's data/ folder (same version as the food list). */
+export const repoFile = (path) => `${base()}${path}`;
+
 /** Base ingredient per 100 g: {name, fr, n:{kcal,p,c,f,fib}} or null. */
 export function ingredientInfo(id) {
   const r = ingredientTable[id];

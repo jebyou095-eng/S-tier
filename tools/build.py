@@ -89,6 +89,7 @@ def main():
     css = theme_css((ROOT / 'css' / 'styles.css').read_text())
     zxing = (JS / 'vendor' / 'zxing.min.js').read_text()
     claude_sdk = (JS / 'vendor' / 'anthropic-sdk.min.js').read_text()  # official Anthropic SDK (browser bundle)
+    tfjs = (JS / 'vendor' / 'tf.min.js').read_text()  # TensorFlow.js for on-device Scan & teach
     icon = data_uri(ROOT / 'icons' / 'apple-touch-icon.png', 'image/png')
     favicon = data_uri(ROOT / 'icons' / 'icon.svg', 'image/svg+xml')
     body = ('<div id="app" aria-live="polite"></div>\n<nav id="tabs" class="tabs" hidden></nav>\n'
@@ -99,7 +100,7 @@ def main():
     # 1) Downloadable offline app
     app = bundle(hosted=False)
     csp = ("default-src 'none'; "
-           f"script-src {sha(zxing)} {sha(claude_sdk)} {sha(app)}; style-src {sha(css)}; "
+           f"script-src {sha(zxing)} {sha(claude_sdk)} {sha(tfjs)} {sha(app)}; style-src {sha(css)}; "
            "img-src data: blob:; media-src blob: mediastream:; "
            "connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'")
     full = f'''<!doctype html>
@@ -120,6 +121,7 @@ def main():
 <body>
 {body}<script type="text/plain" id="lib-zxing">{zxing}</script>
 <script type="text/plain" id="lib-claude">{claude_sdk}</script>
+<script type="text/plain" id="lib-tf">{tfjs}</script>
 <script>{app}</script>
 </body>
 </html>
@@ -133,6 +135,7 @@ def main():
     web = f'''<title>Pocket Stats</title>
 <style>{css}</style>
 {body}<script type="text/plain" id="lib-zxing">{zxing}</script>
+<script type="text/plain" id="lib-tf">{tfjs}</script>
 <script>{bundle(hosted=True)}</script>
 '''
     (out / 'pocket-stats-web.html').write_text(web)

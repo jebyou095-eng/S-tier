@@ -502,3 +502,9 @@ dialog.scanner::backdrop { background: #000; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .ai-kcal { flex: 1; min-width: 0; font-size: 0.9rem; }
+
+/* ---------- Scan & teach ---------- */
+.scan-ring { position: absolute; left: 50%; top: 42%; width: min(72vw, 62vh); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; border: 3px dashed rgb(255 255 255 / 0.9); box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.4); }
+.scan-progress { height: 8px; background: rgb(255 255 255 / 0.2); }
+.scan-progress > div { background: #fff; }
+.scan-panel .btn.primary { width: 100%; }
