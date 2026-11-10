@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'data' / 'sources'))
 from market_foods import FOODS as MARKET  # noqa: E402
+from recipes import INGREDIENTS, RECIPES  # noqa: E402
 
 CATEGORIES = [  # first match wins: (label, exact OFF category tags without the "en:" prefix)
     ('Water', ['waters', 'mineral-waters', 'spring-waters']),
@@ -92,7 +93,23 @@ def market_items():
                 'k': k, 'p': p, 'c': c, 'f': f, 'fi': fi, 's': s, 'sl': sl, 'src': src, 'e': icon}
         if (ROOT / 'data' / 'img' / 'market' / f'{id_}.jpg').exists():  # add your own photo here
             item['img'] = f'img/market/{id_}.jpg'
+        if id_ in RECIPES:
+            item.update(from_recipe(id_))
         yield item
+
+
+def from_recipe(dish):
+    """Nutrition per 100 g of the cooked dish, calculated from its ingredients."""
+    cooked, parts = RECIPES[dish]
+    tot = [0.0] * 5
+    for ing, g in parts:
+        vals = INGREDIENTS[ing][2:]
+        for i in range(5):
+            tot[i] += vals[i] * g / 100
+    k, p, c, f, fi = (t * 100 / cooked for t in tot)
+    return {'k': round(k), 'p': round(p, 1), 'c': round(c, 1), 'f': round(f, 1), 'fi': round(fi, 1), 'src': 'Recipe',
+            # raw grams of each ingredient per 100 g of cooked dish
+            'ing': [[ing, round(g * 100 / cooked, 2)] for ing, g in parts if ing not in ('water', 'salt')]}
 
 
 def image_url(code, imgid):
@@ -120,7 +137,7 @@ def fetch_thumb(code, imgid, dest, size=160):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--off', required=True)
-    ap.add_argument('--images')
+    ap.add_argument('--extra', help='JSONL from the OFF JSONL export: code, front image id, ingredients text')
     ap.add_argument('--no-thumbs', action='store_true')
     a = ap.parse_args()
 
@@ -131,8 +148,15 @@ def main():
             products[item['code']] = item  # later rows win (CSV is one row per product anyway)
     print(f'Open Food Facts: {len(products)} Moroccan products with consistent nutrition', file=sys.stderr)
 
-    if a.images:
-        imgs = dict(l.rstrip('\n').split('\t') for l in open(a.images) if '\t' in l)
+    if a.extra:
+        imgs = {}
+        for line in open(a.extra, encoding='utf-8'):
+            x = json.loads(line)
+            if x['code'] in products:
+                if x.get('ing'):
+                    products[x['code']]['it'] = re.sub(r'\s+', ' ', x['ing']).strip()[:500]
+                if x.get('img'):
+                    imgs[x['code']] = x['img']
         todo = [(c, imgs[c]) for c in products if c in imgs]
         print(f'Thumbnails to fetch: {len(todo)}', file=sys.stderr)
         img_dir = ROOT / 'data' / 'img'
@@ -146,9 +170,11 @@ def main():
         print(f'Thumbnails saved: {done}', file=sys.stderr)
 
     foods = list(market_items()) + sorted(products.values(), key=lambda x: (x['cat'], x['b'].lower(), x['n'].lower()))
+    used = sorted({i for f in foods for i, _ in f.get('ing', [])})
     out = {
         'version': time.strftime('%Y-%m-%d'),
         'where': WHERE,
+        'ingredients': {i: list(INGREDIENTS[i]) for i in used},
         'attribution': 'Packaged products and photos: Open Food Facts contributors (ODbL / CC BY-SA). '
                        'Market foods: USDA FoodData Central values or labelled recipe estimates.',
         'foods': foods,

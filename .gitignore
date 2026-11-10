@@ -4,3 +4,7 @@ android/app/assets/
 *.jks
 *.keystore
 *.idsig
+
+# Python caches
+__pycache__/
+*.pyc

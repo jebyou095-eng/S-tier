@@ -1,6 +1,6 @@
 // Offline support: caches the app's own files. Never touches your data, and leaves the
 // food-database requests alone (they are never cached).
-const CACHE = 'pocket-stats-v4';
+const CACHE = 'pocket-stats-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,8 @@ const ASSETS = [
   './js/nutrition.js',
   './js/scanner.js',
   './js/fooddb.js',
+  './js/recognize.js',
+  './js/vendor/anthropic-sdk.min.js',
   './js/gym.js',
   './js/exercises.js',
   './js/body.js',

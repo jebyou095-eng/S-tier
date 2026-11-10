@@ -10,6 +10,7 @@ const BASE = HOSTED ? 'data/' : REPO; // web-link version ships the list next to
 const MAX_AGE = 7 * 24 * 3600 * 1000;
 
 let foods = [];
+let ingredientTable = {};
 let byCode = new Map();
 let meta = { version: null, fetched: 0, attribution: '', where: {} };
 let loading = null;
@@ -25,7 +26,7 @@ function adopt(json, fetched) {
     brand: String(x.b || '').slice(0, 40),
     alt: `${x.fr || ''} ${x.ar || ''}`.trim(),
     fr: x.fr || '', ar: x.ar || '',
-    source: x.src === 'Estimate' ? 'Estimate' : x.src === 'USDA' ? 'USDA' : 'Open Food Facts',
+    source: ['Estimate', 'USDA', 'Recipe'].includes(x.src) ? x.src : 'Open Food Facts',
     n: { kcal: +x.k, p: +x.p || 0, c: +x.c || 0, f: +x.f || 0, fib: +x.fi || 0 },
     serving: +x.s > 0 ? +x.s : 100,
     servingLabel: String(x.sl || '100 g').slice(0, 30),
@@ -33,7 +34,10 @@ function adopt(json, fetched) {
     img: typeof x.img === 'string' && /^img\/[\w/-]+\.jpg$/.test(x.img) ? x.img : '',
     emoji: typeof x.e === 'string' ? x.e.slice(0, 4) : '',
     where: String(x.w || ''), cat: String(x.cat || ''), qty: String(x.q || ''), nutri: x.ns || '',
+    ing: Array.isArray(x.ing) ? x.ing.filter((i) => Array.isArray(i) && typeof i[0] === 'string' && +i[1] > 0).map((i) => [i[0], +i[1]]) : null,
+    labelIngredients: typeof x.it === 'string' ? x.it.slice(0, 500) : '',
   }));
+  ingredientTable = json.ingredients && typeof json.ingredients === 'object' ? json.ingredients : {};
   for (const f of foods) f.hay = `${f.name} ${f.brand} ${f.alt}`.toLowerCase();
   byCode = new Map(foods.filter((f) => f.code).map((f) => [f.code, f]));
   meta = { version: json.version || null, fetched, attribution: json.attribution || '', where: json.where || {} };
@@ -66,6 +70,13 @@ export function loadFoodDb({ force = false, allowNetwork = true } = {}) {
 }
 
 export const foodDb = () => foods;
+
+/** Base ingredient per 100 g: {name, fr, n:{kcal,p,c,f,fib}} or null. */
+export function ingredientInfo(id) {
+  const r = ingredientTable[id];
+  if (!Array.isArray(r)) return null;
+  return { name: String(r[0]), fr: String(r[1]), n: { kcal: +r[2] || 0, p: +r[3] || 0, c: +r[4] || 0, f: +r[5] || 0, fib: +r[6] || 0 } };
+}
 export const foodDbMeta = () => meta;
 export const findByCode = (code) => byCode.get(code) || byCode.get(code.replace(/^0+/, '')) || null;
 export const onFoodDb = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
@@ -104,10 +115,18 @@ function observe(el, fn) {
 }
 
 /** A square thumbnail: product photo when available, else the food's icon. */
-export function foodThumb(food, { size = 'sm', photos = true } = {}) {
+export function foodThumb(food, { size = 'sm', photos = true, userPhoto = '' } = {}) {
   const box = document.createElement('span');
   box.className = `thumb thumb-${size}`;
   box.setAttribute('aria-hidden', 'true');
+  if (userPhoto) { // your own photo, stored privately on the phone
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = userPhoto;
+    box.append(img);
+    box.classList.add('has-photo');
+    return box;
+  }
   box.textContent = food.emoji || (food.source === 'Open Food Facts' ? '🛒' : '🍽️');
   if (food.img && photos && !HOSTED) {
     observe(box, async () => {

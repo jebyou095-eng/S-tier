@@ -113,7 +113,11 @@ export const FOOD_BY_ID = Object.fromEntries(FOODS.map((x) => [x.id, x]));
 export function searchLocal(q, extra = []) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
+  // The downloaded list comes first in `extra`, so when a built-in food has the same name
+  // (e.g. Harira), the richer downloaded version (recipe, photo, Darija name) wins.
+  const seen = new Set();
   return [...extra, ...FOODS]
+    .filter((f) => { const k = f.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
     .map((f) => {
       const hay = f.hay || `${f.name} ${f.brand || ''} ${f.alt || ''}`.toLowerCase();
       if (!words.every((w) => hay.includes(w))) return null;

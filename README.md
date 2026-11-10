@@ -9,7 +9,7 @@ It also has a **gym section** (exercise library with muscle maps, animated form 
 - **Data never leaves your phone.** No accounts, cloud, server, or sync. Everything is stored in the browser's on-device storage (IndexedDB).
 - **Network access is locked down.** A strict Content-Security-Policy allows exactly two hosts, the USDA and Open Food Facts food databases, and nothing else. The app contacts them **only after you allow it**, and sends **only a barcode number or the words you typed**: no cookies, referrer, device ID, diary entries or body stats. You can turn lookups off in Settings, and the built-in food table still works offline.
 - **The camera stays on the phone.** Barcodes are decoded on the device; frames are never saved or uploaded.
-- **No third-party services.** No CDNs, fonts, analytics or ads. The only bundled library is [ZXing](https://github.com/zxing-js/library) (Apache-2.0, `js/vendor/`), the barcode decoder used on phones without a built-in one (e.g. iPhone).
+- **No third-party services.** No CDNs, fonts, analytics or ads. Two libraries are bundled in `js/vendor/`: [ZXing](https://github.com/zxing-js/library) (Apache-2.0), the barcode decoder for phones without a built-in one, and the official [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) (Apache-2.0), used only by the optional photo recognition.
 - **Optional passcode encryption.** Data is encrypted at rest with AES-256-GCM, using a key derived from your passcode (PBKDF2-SHA256, 600,000 iterations). The key exists only in memory while the app is unlocked. You can set the app to auto-lock, and its screen goes blank in the app switcher.
 - **Works offline.** After the first load, a service worker serves the app with no connection.
 
@@ -44,6 +44,9 @@ The host only ever serves the app's code. Your entries are created and stored on
 - **Gym → Progress:** workouts per week, estimated 1-rep-max trend per exercise, weekly hard sets per muscle vs. the 10–20 set target, personal bests.
 - **Gym → Safety:** PAR-Q+-based health check, red-flag symptoms (with Moroccan emergency numbers), soreness vs. injury, guidance for high blood pressure/heart disease, pregnancy, teens, back pain, diabetes and Ramadan, plus the research and guidelines used (WHO, ACSM, AHA, ACOG, NSCA and peer-reviewed meta-analyses), each linked to PubMed.
 - **Food → Diary:** scan a barcode or search, pick a portion, and see calories, protein, carbs, fat and fiber against your targets. It suggests protein-rich foods to close the day's gap.
+- **Food → Ingredients:** home and street dishes (harira, msemen, tagines, bocadillo, atay…) are calculated from real recipes. Open one to see each ingredient in your portion, then remove it, halve it or double it ("no smen", "½ sugar") and watch the calories change.
+- **Food → Recognise from a photo (optional, off by default):** Claude identifies each food in the photo, Moroccan dishes included, estimates grams and ingredients, and matches it to the food list. You review and adjust everything before logging. This is the only feature that sends a photo off the phone: with your own Anthropic API key in the app and downloaded file, or through your claude.ai account in the web link. Nothing else is sent.
+- **Your own photos:** add a photo to any food from its page. It is stored only on your phone (encrypted with your passcode).
 - **Food → Plan:** your calorie and macro targets (Mifflin–St Jeor × activity, adjusted for bulk, lean bulk, recomp or cut; protein 1.8–2.2 g/kg), a sample day scaled to hit them (omnivore or vegetarian), and evidence-based training and nutrition tips.
 - **Food → Progress:** weekly weight-change rate vs. the right range for your goal, with a suggested calorie adjustment, plus 14-day calorie and protein charts.
 - **Settings:** manage trackers, set the passcode and auto-lock, export an encrypted backup, restore, export CSV, erase everything.
@@ -84,6 +87,8 @@ python3 -m http.server 8000
 | `js/exercises.js` | Exercise library, muscles, programs, references |
 | `js/body.js` | 2D front/back muscle maps |
 | `js/poses.js` | Animated exercise demonstrations |
+| `js/fooddb.js` | Downloads and caches the Moroccan food list and photos from this repo |
+| `js/recognize.js` | Optional photo recognition with Claude |
 | `js/ui.js` | Shared UI helpers |
 | `sw.js` | Offline cache (app files only) |
 | `tools/build.py` | Bundles everything into the single-file `dist/` builds |

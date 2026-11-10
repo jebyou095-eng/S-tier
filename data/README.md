@@ -10,7 +10,7 @@ Nothing personal is ever sent: GitHub only sees that the public list or a photo 
 |---|---|---|
 | **Supermarket** (Marjane, Carrefour, BIM, Aswak Assalam, épiceries) | [Open Food Facts](https://world.openfoodfacts.org/country/morocco): products tagged as sold in Morocco | Copied from the nutrition label by contributors. Products whose calories don't match their protein/carbs/fat are left out. |
 | **Souk / market** (fruit, vegetables, legumes, nuts, olives, meat, fish, dairy) | `sources/market_foods.py` | USDA FoodData Central reference values |
-| **Street food, café, bakery, home cooking** (msemen, harira, bocadillo, tagine…) | `sources/market_foods.py` | **Estimates** from typical recipes. Recipes vary, so weigh your portion. |
+| **Street food, café, bakery, home cooking** (msemen, harira, bocadillo, tagine…) | `sources/recipes.py` | **Calculated** from a typical family recipe (ingredient grams + cooked weight) using USDA values for each ingredient. In the app you can remove or change any ingredient. Recipes vary, so weigh your portion. |
 
 ## Updating
 

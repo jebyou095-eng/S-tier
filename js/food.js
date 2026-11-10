@@ -7,7 +7,8 @@ import {
   ACTIVITY, GOALS, targets, scale, sum, lookupBarcode, searchOnline, agreement, buildPlan, suggestions,
 } from './nutrition.js';
 import { scanBarcode, canonicalBarcode } from './scanner.js';
-import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable } from './fooddb.js';
+import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo } from './fooddb.js';
+import { recognizeFood, recognitionMode, preparePhoto, RecognitionError } from './recognize.js';
 
 const MEALS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' };
 const k0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
@@ -22,7 +23,7 @@ const F = () => ctx.state.food;
 
 // ---------- data ----------
 export function freshFood() {
-  return { profile: null, log: [], saved: [], online: false, usdaKey: '', moroccoDb: true, photos: true };
+  return { profile: null, log: [], saved: [], online: false, usdaKey: '', moroccoDb: true, photos: true, myPhotos: {}, ai: false, aiKey: '' };
 }
 
 const num = (x, lo, hi) => (Number.isFinite(+x) && +x >= lo && +x <= hi ? +x : null);
@@ -67,6 +68,13 @@ export function normalizeFood(raw) {
   out.online = raw.online === true;
   out.moroccoDb = raw.moroccoDb !== false;
   out.photos = raw.photos !== false;
+  out.ai = raw.ai === true;
+  out.aiKey = typeof raw.aiKey === 'string' && /^[\w-]{0,200}$/.test(raw.aiKey) ? raw.aiKey : '';
+  if (raw.myPhotos && typeof raw.myPhotos === 'object') {
+    for (const [k, v] of Object.entries(raw.myPhotos).slice(0, 300)) {
+      if (typeof v === 'string' && v.startsWith('data:image/jpeg;base64,') && v.length < 200000) out.myPhotos[String(k).slice(0, 60)] = v;
+    }
+  }
   out.usdaKey = /^[A-Za-z0-9]{0,64}$/.test(raw.usdaKey || '') ? raw.usdaKey || '' : '';
   return out;
 }
@@ -122,28 +130,91 @@ async function ensureOnline() {
 
 // ---------- dialogs ----------
 function sourceBadge(food) {
-  const cls = { 'Open Food Facts': 'off', USDA: 'usda', Estimate: 'est' }[food.source] || 'you';
-  return h('span', { class: `src src-${cls}`, title: food.source === 'Estimate' ? 'Typical home recipe. Values vary; weigh and adjust.' : null }, food.source === 'Estimate' ? 'Estimate' : food.source);
+  const cls = { 'Open Food Facts': 'off', USDA: 'usda', Estimate: 'est', Recipe: 'rec', 'Photo estimate': 'ai' }[food.source] || 'you';
+  return h('span', { class: `src src-${cls}`, title: { Estimate: 'Typical home recipe. Values vary; weigh and adjust.', Recipe: 'Calculated from a typical recipe using USDA ingredient values.', 'Photo estimate': "Claude's estimate from your photo." }[food.source] || null }, food.source === 'Estimate' ? 'Estimate' : food.source);
 }
 
 function macroLine(n) {
   return `${k0.format(n.kcal)} kcal · P ${k1.format(n.p)} g · C ${k1.format(n.c)} g · F ${k1.format(n.f)} g`;
 }
 
-function portionDialog(food, { grams: g0, meal: m0, edit = false } = {}) {
+const MULTS = [[0, 'None'], [0.5, '½'], [1, 'Normal'], [2, '2×']];
+
+/** Nutrition per 100 g of a recipe dish with some ingredients removed or changed. */
+function recipeN(food, mult) {
+  const out = { kcal: 0, p: 0, c: 0, f: 0, fib: 0 };
+  for (const [id, g] of food.ing) {
+    const info = ingredientInfo(id);
+    if (!info) continue;
+    const m = mult[id] ?? 1;
+    for (const k of Object.keys(out)) out[k] += (info.n[k] * g * m) / 100;
+  }
+  return out;
+}
+
+function modsLabel(food, mult) {
+  const parts = Object.entries(mult).filter(([, m]) => m !== 1).map(([id, m]) => {
+    const nm = (ingredientInfo(id)?.name || id).split(' (')[0].toLowerCase();
+    return m === 0 ? `no ${nm}` : m === 0.5 ? `½ ${nm}` : `2× ${nm}`;
+  });
+  return parts.join(', ');
+}
+
+/** Add or replace your own photo of a food. Stored privately (encrypted with your passcode). */
+async function addMyPhoto(food, box) {
+  const input = h('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+      const { dataUrl } = await preparePhoto(file, 320);
+      F().myPhotos[food.id] = dataUrl;
+      await ctx.save();
+      box.replaceWith(foodThumb(food, { size: 'lg', userPhoto: dataUrl }));
+      toast('Photo saved on your phone');
+    } catch {
+      toast("Couldn't read that photo.");
+    }
+  });
+  input.click();
+}
+
+function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel } = {}) {
   return modal((done) => {
+    const mult = {};
+    const hasRecipe = Array.isArray(food.ing) && food.ing.length && food.ing.every(([id]) => ingredientInfo(id));
     const grams = h('input', { type: 'text', inputmode: 'decimal', value: String(g0 ?? food.serving), 'aria-label': 'Amount in grams', autofocus: true });
     const meal = h('select', { 'aria-label': 'Meal' }, ...Object.entries(MEALS).map(([k, v]) => h('option', { value: k, selected: k === (m0 || defaultMeal()) }, v)));
     const preview = h('div', { class: 'preview' });
+    const ingList = h('ul', { class: 'ing-list' });
     const val = () => parseFloat(grams.value.replace(',', '.'));
+    const changed = () => hasRecipe && Object.keys(mult).length > 0;
+    const currentN = () => (changed() ? recipeN(food, mult) : food.n);
     const update = () => {
       const g = val();
       if (!(g > 0)) { preview.replaceChildren(h('span', { class: 'muted' }, 'Enter an amount')); return; }
-      const n = scale(food.n, g);
+      const n = scale(currentN(), g);
+      const base = scale(food.n, g);
+      const diff = changed() ? Math.round(n.kcal - base.kcal) : 0;
       preview.replaceChildren(
-        h('div', { class: 'big' }, `${k0.format(n.kcal)} kcal`),
+        h('div', { class: 'big' }, `${k0.format(n.kcal)} kcal`,
+          diff ? h('span', { class: `delta ${diff < 0 ? 'ok' : 'warn'}` }, ` ${diff > 0 ? '+' : '−'}${k0.format(Math.abs(diff))} vs usual recipe`) : null),
         h('div', { class: 'macros' },
           h('span', { class: 'm-p' }, `P ${k1.format(n.p)} g`), h('span', { class: 'm-c' }, `C ${k1.format(n.c)} g`), h('span', { class: 'm-f' }, `F ${k1.format(n.f)} g`)));
+      if (hasRecipe) {
+        ingList.replaceChildren(...food.ing.map(([id, per100]) => {
+          const info = ingredientInfo(id);
+          const m = mult[id] ?? 1;
+          const ig = (per100 * g) / 100;
+          const kcal = (info.n.kcal * ig * m) / 100;
+          return h('li', { class: m === 0 ? 'removed' : '' },
+            h('span', { class: 'ing-name' }, info.name, h('span', { class: 'muted small block' }, `${k0.format(ig * m)} g · ${k0.format(kcal)} kcal`)),
+            h('span', { class: 'ing-mult', role: 'group', 'aria-label': `${info.name} amount` }, ...MULTS.map(([v, l]) => h('button', {
+              type: 'button', class: `mult${m === v ? ' on' : ''}`, 'aria-pressed': String(m === v),
+              onclick: () => { if (v === 1) delete mult[id]; else mult[id] = v; update(); },
+            }, l))));
+        }));
+      }
     };
     grams.addEventListener('input', update);
     const quick = [
@@ -151,12 +222,24 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false } = {}) {
       ['½ serving', food.serving / 2], ['2 servings', food.serving * 2], ['100 g', 100],
     ].filter(([l]) => l).map(([l, g]) => h('button', { type: 'button', class: 'chip', onclick: () => { grams.value = String(Math.round(g * 10) / 10); update(); } }, l === food.servingLabel && !/\bg\b/.test(l) ? `${l} (${k0.format(g)} g)` : l));
     update();
+    const thumb = foodThumb(food, { size: 'lg', photos: photosOn(), userPhoto: F().myPhotos[food.id] });
     return h('form', {
       class: 'sheet-body',
-      onsubmit: (e) => { e.preventDefault(); const g = val(); if (g > 0 && g < 10000) done({ grams: g, meal: meal.value }); },
+      onsubmit: (e) => {
+        e.preventDefault();
+        const g = val();
+        if (!(g > 0 && g < 10000)) return;
+        let chosen = food;
+        const label = hasRecipe ? modsLabel(food, mult) : '';
+        if (label) {
+          chosen = { ...food, id: `${food.id}~${uid().slice(0, 6)}`, name: `${food.name} (${label})`.slice(0, 80), n: recipeN(food, mult), ing: null };
+        }
+        done({ grams: g, meal: meal.value, food: chosen });
+      },
     },
     h('div', { class: 'portion-head' },
-      foodThumb(food, { size: 'lg', photos: photosOn() }),
+      h('div', { class: 'thumb-col' }, thumb,
+        h('button', { type: 'button', class: 'link small', onclick: () => addMyPhoto(food, thumb) }, F().myPhotos[food.id] ? '📷 Change photo' : '📷 Add photo')),
       h('div', { class: 'grow-wrap' },
         h('h2', {}, food.name),
         food.fr || food.ar ? h('p', { class: 'muted small' }, food.fr || '', food.ar ? h('span', { lang: 'ar', dir: 'rtl' }, ` · ${food.ar}`) : null) : null,
@@ -166,10 +249,18 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false } = {}) {
     h('div', { class: 'chips' }, ...quick),
     h('div', { class: 'row' }, h('label', { class: 'field grow' }, h('span', {}, 'Grams'), grams), h('label', { class: 'field grow' }, h('span', {}, 'Meal'), meal)),
     preview,
+    hasRecipe ? h('details', { class: 'ing-box', open: true },
+      h('summary', {}, 'Ingredients in this portion'),
+      h('p', { class: 'muted small' }, 'Remove or change an ingredient to see the new calories. Based on a typical recipe (USDA ingredient values).'),
+      ingList) : null,
+    !hasRecipe && food.labelIngredients ? h('details', { class: 'ing-box' },
+      h('summary', {}, 'Ingredients (from the label)'),
+      h('p', { class: 'small' }, food.labelIngredients),
+      h('p', { class: 'muted small' }, 'Packaged product: the recipe is fixed, so ingredients can’t be removed.')) : null,
     h('div', { class: 'row end' },
       edit ? h('button', { type: 'button', class: 'btn danger', onclick: () => done('delete') }, 'Delete') : null,
       h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, 'Cancel'),
-      h('button', { type: 'submit', class: 'btn primary' }, edit ? 'Save' : 'Add')));
+      h('button', { type: 'submit', class: 'btn primary' }, okLabel || (edit ? 'Save' : 'Add'))));
   });
 }
 
@@ -226,7 +317,7 @@ const photosOn = () => F().photos !== false;
 function resultRow(food, onPick) {
   return h('li', {},
     h('button', { class: 'result with-thumb', type: 'button', onclick: () => onPick(food) },
-      foodThumb(food, { photos: photosOn() }),
+      foodThumb(food, { photos: photosOn(), userPhoto: F().myPhotos[food.id] }),
       h('span', { class: 'r-text' },
         h('span', { class: 'r-name' }, food.name, food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null,
           food.ar ? h('span', { class: 'r-ar', lang: 'ar', dir: 'rtl' }, ` ${food.ar}`) : null),
@@ -247,7 +338,7 @@ function searchDialog(meal) {
     const status = h('p', { class: 'muted small' });
     const pick = (food) => done(food);
     const local = () => {
-      const res = dedupe(searchLocal(q.value, [...F().saved, ...(F().moroccoDb ? foodDb() : [])])).slice(0, 30);
+      const res = dedupe(searchLocal(q.value, [...(F().moroccoDb ? foodDb() : []), ...F().saved])).slice(0, 30);
       list.replaceChildren(...res.map((f) => resultRow(f, pick)));
       if (!q.value.trim()) {
         const recent = F().saved.slice(0, 8);
@@ -340,6 +431,132 @@ function browseDialog(meal) {
   });
 }
 
+// ---------- photo recognition ----------
+async function ensureAi() {
+  const hosted = recognitionMode() === 'sample';
+  if (F().ai && (hosted || F().aiKey)) return true;
+  const key = h('input', { type: 'password', value: F().aiKey, placeholder: 'sk-ant-…', autocomplete: 'off', 'aria-label': 'Anthropic API key' });
+  const err = h('p', { class: 'error', hidden: true });
+  const ok = await modal((done) => h('form', {
+    class: 'sheet-body',
+    onsubmit: (e) => {
+      e.preventDefault();
+      if (!hosted && !/^sk-ant-[\w-]{10,}$/.test(key.value.trim())) { err.textContent = 'Paste an Anthropic API key (it starts with sk-ant-).'; err.hidden = false; return; }
+      done(true);
+    },
+  },
+  h('h2', {}, 'Recognise food from a photo'),
+  h('p', {}, 'Claude looks at your photo, names each food (Moroccan dishes included), estimates the amount and its ingredients, and matches it to the food list. You check and adjust everything before it is logged.'),
+  h('div', { class: 'alert warnbox' },
+    h('strong', {}, 'This sends the photo off your phone.'),
+    h('p', {}, hosted
+      ? 'The photo goes to Claude through your claude.ai account. Only the photo and the food list are sent: never your diary, body stats or other data.'
+      : 'The photo goes to Anthropic (the company that makes Claude) using your own API key. Only the photo and the food list are sent: never your diary, body stats or other data. Everything else in the app stays offline.')),
+  hosted ? null : h('label', { class: 'field' }, h('span', {}, 'Your Anthropic API key'), key),
+  hosted ? null : h('p', { class: 'muted small' }, 'Create one at console.anthropic.com (separate from a claude.ai subscription). It costs a few US cents per photo. The key stays on this phone, encrypted if you set a passcode.'),
+  err,
+  h('div', { class: 'row end' },
+    h('button', { type: 'button', class: 'btn ghost', onclick: () => done(false) }, 'Not now'),
+    h('button', { type: 'submit', class: 'btn primary' }, 'Turn on'))));
+  if (!ok) return false;
+  F().ai = true;
+  if (!hosted) F().aiKey = key.value.trim();
+  await ctx.save();
+  return true;
+}
+
+function pickPhoto() {
+  return new Promise((resolve) => {
+    const input = h('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+    input.addEventListener('change', () => resolve(input.files[0] || null));
+    input.click();
+  });
+}
+
+function busy(text) {
+  let close;
+  modal((done) => { close = done; return h('div', { class: 'sheet-body center' }, h('div', { class: 'spinner', 'aria-hidden': 'true' }), h('p', {}, text)); });
+  return () => close(null);
+}
+
+function resultsDialog(result, meal) {
+  const catalog = new Map(foodDb().map((f) => [f.id, f]));
+  const items = result.items.map((x) => {
+    const match = x.catalogId && catalog.get(x.catalogId);
+    const food = match || {
+      id: `ai:${uid()}`, name: x.name, source: 'Photo estimate', n: x.n, serving: x.grams || 100,
+      servingLabel: `${x.grams || 100} g (from photo)`, emoji: '📸',
+    };
+    return { ...x, food, grams: x.grams || food.serving, on: x.confidence !== 'low' || result.items.length === 1 };
+  });
+  return modal((done) => {
+    const list = h('ul', { class: 'ai-list' });
+    const total = h('p', { class: 'big' });
+    const logBtn = h('button', { type: 'button', class: 'btn primary' });
+    const draw = () => {
+      list.replaceChildren(...items.map((it) => {
+        const n = scale(it.food.n, it.grams);
+        const gIn = h('input', { type: 'text', inputmode: 'decimal', value: String(it.grams), 'aria-label': `${it.name} grams`, class: 'g-in' });
+        gIn.addEventListener('change', () => { const v = parseFloat(gIn.value.replace(',', '.')); if (v > 0) { it.grams = v; draw(); } });
+        return h('li', { class: it.on ? '' : 'off' },
+          h('input', { type: 'checkbox', checked: it.on, 'aria-label': `Log ${it.name}`, onchange: (e) => { it.on = e.target.checked; draw(); } }),
+          foodThumb(it.food, { photos: photosOn(), userPhoto: F().myPhotos[it.food.id] }),
+          h('div', { class: 'grow-wrap' },
+            h('div', {}, h('strong', {}, it.food.name), ' ', h('span', { class: `conf conf-${it.confidence}` }, it.confidence)),
+            it.food.id.startsWith('ai:') ? h('div', { class: 'muted small' }, 'Not in the food list: Claude’s estimate') : h('div', { class: 'muted small' }, `Matched: ${sourceBadge(it.food).textContent}`),
+            it.ingredients.length ? h('div', { class: 'muted small' }, `Seen: ${it.ingredients.map((i) => `${i.name} ${i.grams} g`).join(', ')}`) : null,
+            h('div', { class: 'row' }, gIn, h('span', { class: 'muted' }, 'g'), h('span', { class: 'ai-kcal' }, `${k0.format(n.kcal)} kcal · P ${k0.format(n.p)} g`),
+              h('button', {
+                type: 'button', class: 'link small', onclick: async () => {
+                  const r = await portionDialog(it.food, { grams: it.grams, meal, okLabel: 'Use' });
+                  if (r && r !== 'delete') { it.food = r.food || it.food; it.grams = r.grams; it.on = true; draw(); }
+                },
+              }, it.food.ing ? 'Ingredients…' : 'Adjust…'))));
+      }));
+      const sel = items.filter((i) => i.on);
+      total.textContent = `${k0.format(sum(sel.map((i) => scale(i.food.n, i.grams))).kcal)} kcal`;
+      logBtn.textContent = sel.length ? `Log ${sel.length} item${sel.length > 1 ? 's' : ''}` : 'Nothing selected';
+      logBtn.disabled = !sel.length;
+    };
+    logBtn.addEventListener('click', () => done(items.filter((i) => i.on)));
+    draw();
+    return h('div', { class: 'sheet-body' },
+      h('div', { class: 'row' }, h('img', { src: result.photo, alt: 'Your photo', class: 'ai-photo' }), h('div', { class: 'grow-wrap' }, h('h2', {}, 'What Claude sees'), total)),
+      result.items.length ? null : h('p', { class: 'warn' }, 'No food recognised.'),
+      result.notes ? h('p', { class: 'muted small' }, result.notes) : null,
+      list,
+      h('p', { class: 'muted small' }, 'Amounts from a photo are estimates (often ±20–30%). Check the grams, especially oil and sauces you can’t see.'),
+      h('div', { class: 'row end' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, 'Cancel'), logBtn));
+  });
+}
+
+async function recognizeFlow(meal = defaultMeal()) {
+  if (!await ensureAi()) return;
+  const file = await pickPhoto();
+  if (!file) return;
+  const catalog = foodDb().filter((f) => f.where && f.where !== 'supermarket').map((f) => ({ id: f.id, name: f.name, fr: f.fr }));
+  const stop = busy('Claude is looking at your photo…');
+  let result;
+  try {
+    result = await recognizeFood(file, catalog, { apiKey: F().aiKey });
+  } catch (err) {
+    stop();
+    toast(err instanceof RecognitionError ? err.message : 'Recognition failed. Try again.');
+    if (err?.code === 'auth') { F().ai = false; await ctx.save(); }
+    return;
+  }
+  stop();
+  const chosen = await resultsDialog(result, meal);
+  if (!chosen?.length) return;
+  const ts = foodDay === dayKey() ? Date.now() : new Date(`${foodDay}T12:00`).getTime();
+  for (const it of chosen) {
+    remember(it.food);
+    F().log.push({ ...cleanFood(it.food), id: uid(), day: foodDay, ts, grams: it.grams, meal });
+  }
+  await ctx.commit();
+  toast(`Logged ${chosen.length} item${chosen.length > 1 ? 's' : ''}`);
+}
+
 async function browseFlow(meal = defaultMeal()) {
   const food = await browseDialog(meal);
   if (food) return pickAndLog(food, meal);
@@ -349,7 +566,7 @@ async function browseFlow(meal = defaultMeal()) {
 async function pickAndLog(food, meal) {
   if (!food) return;
   const r = await portionDialog(food, { meal });
-  if (r && r !== 'delete') await addEntry(food, r.grams, r.meal);
+  if (r && r !== 'delete') await addEntry(r.food || food, r.grams, r.meal);
 }
 
 async function searchFlow(meal = defaultMeal()) {
@@ -520,6 +737,7 @@ function viewDiary() {
   const actions = h('div', { class: 'scan-actions' },
     h('button', { class: 'btn primary big-btn', onclick: scanFlow }, h('span', { 'aria-hidden': 'true' }, '▥ '), 'Scan barcode'),
     h('button', { class: 'btn ghost big-btn', onclick: () => searchFlow() }, h('span', { 'aria-hidden': 'true' }, '⌕ '), 'Search food'),
+    h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => recognizeFlow() }, h('span', { 'aria-hidden': 'true' }, '📸 '), 'Recognise food from a photo'),
     F().moroccoDb ? h('button', { class: 'btn ghost big-btn browse-btn', onclick: () => browseFlow() }, h('span', { 'aria-hidden': 'true' }, '🇲🇦 '), 'Moroccan foods: supermarket, souk & street') : null);
 
   const setup = !p ? h('article', { class: 'card callout' },
@@ -707,6 +925,17 @@ export function foodSettingsCard(c) {
         F().usdaKey = v; await ctx.commit(); toast('Saved');
       },
     }, 'Save key')]),
+    h('h3', {}, 'Photo recognition (Claude)'),
+    h('label', { class: 'switch-row' },
+      h('span', { class: 'grow' }, 'Recognise food from photos', h('span', { class: 'muted small block' },
+        recognitionMode() === 'sample' ? 'Sends the photo you take to Claude through your claude.ai account. Nothing else is sent.' : 'Sends the photo you take to Anthropic with your API key. Nothing else is sent. A few US cents per photo.')),
+      h('input', { type: 'checkbox', role: 'switch', checked: F().ai, onchange: async (e) => { if (e.target.checked) { if (!await ensureAi()) e.target.checked = false; } else { F().ai = false; await ctx.save(); } } })),
+    recognitionMode() === 'api' && F().aiKey ? h('button', {
+      class: 'btn ghost', onclick: async () => {
+        if (!await confirmDialog('Remove API key?', 'Photo recognition turns off until you add a key again.', 'Remove', true)) return;
+        F().aiKey = ''; F().ai = false; await ctx.commit();
+      },
+    }, 'Remove API key') : null,
     h('h3', {}, 'Moroccan food database'),
     h('label', { class: 'switch-row' },
       h('span', { class: 'grow' }, 'Use the Moroccan food list', h('span', { class: 'muted small block' }, 'Supermarket products plus souk, street and home foods. Downloaded from this app’s GitHub repo about once a week; it holds no personal data and nothing about you is sent.')),
