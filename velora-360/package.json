@@ -1,0 +1,7 @@
+{
+  "name": "velora-360",
+  "private": true,
+  "type": "module",
+  "description": "Velora 360: a 360° car showroom. Frontend and backend in separate folders.",
+  "scripts": { "install:all": "npm --prefix backend install", "dev": "node dev.js", "test": "npm --prefix backend test", "seed": "npm --prefix backend run seed" }
+}

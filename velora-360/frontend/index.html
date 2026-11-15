@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Velora 360 · The 360° car showroom</title>
+  <meta name="description" content="Explore every new car in 360°, inside and out. Compare models side by side, check prices and specs, and book a test drive." />
+  <meta name="theme-color" content="#0b0c0f" />
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <script type="importmap">{ "imports": { "three": "./js/vendor/three/three.module.js" } }</script>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+  <div class="api-banner" id="apiBanner" hidden></div>
+  <header class="nav" id="nav">
+    <div class="container nav__in">
+      <a href="#/" class="logo"><span class="logo__ring"><b>360</b></span><span>Velora</span></a>
+      <nav class="nav__links" id="navLinks">
+        <a href="#/cars" data-nav="cars">All cars</a>
+        <a href="#/brands" data-nav="brands">Brands</a>
+        <a href="#/cars?body=suv" data-nav="suv">SUVs</a>
+        <a href="#/cars?fuel=Electric" data-nav="ev">Electric</a>
+        <a href="#/compare" data-nav="compare">Compare <span class="pill" id="cmpCount" hidden>0</span></a>
+      </nav>
+      <form class="search" id="navSearch"><input name="q" placeholder="Search a brand or model…" aria-label="Search cars" /></form>
+      <button class="burger" id="burger" aria-label="Menu"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main id="app" class="page"></main>
+
+  <footer class="footer">
+    <div class="container footer__in">
+      <div><a href="#/" class="logo"><span class="logo__ring"><b>360</b></span><span>Velora</span></a>
+        <p>Every new car, in 360°. Explore, compare and book a test drive before you visit the dealer.</p></div>
+      <div class="footer__cols">
+        <div><h4>Explore</h4><a href="#/cars">All cars</a><a href="#/brands">Brands</a><a href="#/compare">Compare</a></div>
+        <div><h4>Body types</h4><a href="#/cars?body=suv">SUV</a><a href="#/cars?body=sedan">Sedan</a><a href="#/cars?body=hatchback">Hatchback</a><a href="#/cars?body=coupe">Coupé</a><a href="#/cars?body=pickup">Pickup</a></div>
+        <div><h4>Velora</h4><a href="#/cars?fuel=Electric">Electric cars</a><a href="#/admin">Dealer admin</a></div>
+      </div>
+    </div>
+    <div class="container footer__bottom"><span>© <span id="year"></span> Velora 360 · Demo catalogue, fictional brands</span><span>Prices in Moroccan dirhams (MAD)</span></div>
+  </footer>
+
+  <div class="cmp-dock" id="cmpDock" hidden></div>
+  <div class="modal" id="modal" hidden><div class="modal__scrim" data-close></div><div class="modal__box" id="modalBox"></div></div>
+  <div class="toasts" id="toasts"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

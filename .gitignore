@@ -30,3 +30,8 @@ marketplace/backend/.env
 dar-naji/**/node_modules/
 dar-naji/backend/data/
 dar-naji/backend/.env
+
+# Velora 360
+velora-360/**/node_modules/
+velora-360/backend/data/
+velora-360/backend/.env

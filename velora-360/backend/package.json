@@ -1,0 +1,19 @@
+{
+  "name": "velora-backend",
+  "version": "1.0.0",
+  "description": "API for Velora 360, the 360° car showroom",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node src/smoke-test.js",
+    "seed": "node src/server.js --reset-only"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.22.3"
+  }
+}
