@@ -1,0 +1,14 @@
+{
+  "name": "agora-marketplace",
+  "private": true,
+  "type": "module",
+  "description": "Agora: a buy & sell marketplace. Frontend and backend live in separate folders.",
+  "scripts": {
+    "install:all": "npm --prefix backend install",
+    "backend": "npm --prefix backend start",
+    "frontend": "npm --prefix frontend start",
+    "dev": "node dev.js",
+    "test": "npm --prefix backend test",
+    "seed": "npm --prefix backend run seed"
+  }
+}

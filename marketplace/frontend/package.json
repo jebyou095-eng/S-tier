@@ -1,0 +1,11 @@
+{
+  "name": "agora-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for the Agora buy & sell marketplace (no build step)",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "MIT"
+}
