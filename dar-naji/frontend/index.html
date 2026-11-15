@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dar Naji · Cuisine marocaine à Rabat</title>
+  <meta name="description" content="Dar Naji, restaurant de cuisine marocaine à Rabat : tajines, couscous, grillades, thé à la menthe et cocktails. Terrasse et salon privé. Réservez votre table en ligne." />
+  <meta name="theme-color" content="#123b36" />
+  <link rel="icon" href="images/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Jost:wght@400;500;600&family=Amiri:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="loader" id="loader"><div class="loader__mark">دار ناجي</div></div>
+  <div class="api-banner" id="apiBanner" hidden></div>
+
+  <header class="nav" id="nav">
+    <div class="container nav__inner">
+      <a href="#top" class="brand"><span class="brand__ar">دار ناجي</span><span class="brand__fr">Dar Naji</span></a>
+      <nav class="nav__links" id="navLinks">
+        <a href="#maison">La maison</a><a href="#carte">La carte</a><a href="#rituel">Le rituel</a>
+        <a href="#galerie">Galerie</a><a href="#infos">Infos</a>
+      </nav>
+      <span class="open-pill" id="openPill"></span>
+      <a href="#reserver" class="btn btn--gold btn--sm nav__cta">Réserver</a>
+      <button class="burger" id="burger" aria-label="Menu"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero__slides" id="heroSlides"></div>
+      <div class="hero__veil"></div>
+      <div class="container hero__content">
+        <p class="hero__kicker reveal-up" style="--d:.2s"><span id="heroCuisine"></span> · <span id="heroCity"></span></p>
+        <h1 class="hero__title">
+          <span class="hero__ar reveal-up" style="--d:.35s">دار ناجي</span>
+          <span class="mask"><span class="reveal-line" style="--d:.5s">Dar Naji</span></span>
+        </h1>
+        <p class="hero__sub reveal-up" style="--d:.8s">Les saveurs de la tradition marocaine, servies avec générosité, en salle, en terrasse ou dans notre salon privé.</p>
+        <div class="hero__cta reveal-up" style="--d:.95s">
+          <a href="#reserver" class="btn btn--gold">Réserver une table</a>
+          <a href="#carte" class="btn btn--ghost">Découvrir la carte</a>
+        </div>
+        <a class="rating reveal-up" style="--d:1.1s" id="ratingBadge" target="_blank" rel="noopener">
+          <span class="rating__stars" id="ratingStars"></span><b id="ratingValue"></b><span id="ratingCount"></span>
+        </a>
+      </div>
+      <div class="hero__dots" id="heroDots"></div>
+      <a href="#maison" class="scroll-cue" aria-label="Défiler"><span></span></a>
+    </section>
+
+    <div class="ribbon" aria-hidden="true"><div class="ribbon__track" id="ribbon"></div></div>
+
+    <!-- LA MAISON -->
+    <section class="section pattern-bg" id="maison">
+      <div class="container split">
+        <div class="split__media">
+          <figure class="arch arch--big reveal-img"><img id="aboutA" alt="La salle de Dar Naji" loading="lazy" /></figure>
+          <figure class="arch arch--small reveal-img" style="--d:.2s"><img id="aboutB" alt="Tajine" loading="lazy" /></figure>
+          <div class="stamp reveal" style="--d:.4s"><svg viewBox="0 0 100 100"><defs><path id="c" d="M50,50 m-38,0 a38,38 0 1,1 76,0 a38,38 0 1,1 -76,0"/></defs><text><textPath href="#c">• Cuisine marocaine • Rabat • Dar Naji </textPath></text></svg><span>✦</span></div>
+        </div>
+        <div class="split__text">
+          <span class="eyebrow reveal">La maison</span>
+          <h2 class="reveal" style="--d:.08s">Une table marocaine, <em>comme à la maison.</em></h2>
+          <p class="reveal" style="--d:.16s">Chez Dar Naji, on cuisine comme on reçoit au Maroc : avec patience et générosité. Les tajines mijotent lentement, le couscous est roulé à la main et le thé à la menthe est versé de haut, comme le veut la tradition.</p>
+          <p class="reveal" style="--d:.22s">Pour un déjeuner en terrasse, un dîner en famille ou une soirée entre amis autour d’un cocktail, il y a une table pour vous.</p>
+          <ul class="features">
+            <li class="reveal" style="--d:.28s"><span class="ico">☀</span><div><b>Terrasse</b><small>Déjeuner au soleil, dîner sous les lanternes</small></div></li>
+            <li class="reveal" style="--d:.34s"><span class="ico">◈</span><div><b>Salle à manger privée</b><small>Anniversaires, repas d’affaires, fêtes de famille</small></div></li>
+            <li class="reveal" style="--d:.4s"><span class="ico">✧</span><div><b>Excellents cocktails</b><small>Créations du bar, avec ou sans alcool</small></div></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- SIGNATURES -->
+    <section class="section section--dark">
+      <div class="container">
+        <div class="head center">
+          <span class="eyebrow reveal">Nos incontournables</span>
+          <h2 class="reveal" style="--d:.08s">Les <em>signatures</em> de la maison</h2>
+        </div>
+        <div class="signatures" id="signatures"></div>
+      </div>
+    </section>
+
+    <!-- CARTE -->
+    <section class="section pattern-bg" id="carte">
+      <div class="container">
+        <div class="head center">
+          <span class="eyebrow reveal">La carte</span>
+          <h2 class="reveal" style="--d:.08s">Ce qui <em>mijote</em> en cuisine</h2>
+          <p class="reveal muted" style="--d:.14s">Prix en dirhams marocains (MAD), service compris.</p>
+        </div>
+        <div class="tabs reveal" id="menuTabs" role="tablist"></div>
+        <div class="menu" id="menuList"><div class="menu__loading">Chargement de la carte…</div></div>
+        <p class="note center reveal">Carte indicative, susceptible d’évoluer selon le marché. Une allergie ? Dites-le-nous.</p>
+      </div>
+    </section>
+
+    <!-- RITUEL DU THÉ -->
+    <section class="ritual" id="rituel">
+      <div class="ritual__img"><img id="teaImg" alt="Service du thé à la menthe" loading="lazy" data-parallax="0.08" /></div>
+      <div class="ritual__body">
+        <div class="pour" aria-hidden="true"><span class="pour__stream"></span><span class="pour__glass"><i></i></span></div>
+        <span class="eyebrow reveal">Le rituel</span>
+        <h2 class="reveal" style="--d:.08s">Le thé à la menthe, <em>versé de haut.</em></h2>
+        <p class="reveal" style="--d:.16s">Chez nous, le thé est une cérémonie. Menthe fraîche, thé vert et un geste précis : la théière s’élève pour aérer le thé et former sa mousse. Un spectacle à ne pas manquer à table.</p>
+        <div class="ritual__steps">
+          <div class="reveal" style="--d:.2s"><b>01</b><span>Thé vert de Chine</span></div>
+          <div class="reveal" style="--d:.28s"><b>02</b><span>Menthe fraîche du jour</span></div>
+          <div class="reveal" style="--d:.36s"><b>03</b><span>Versé de haut, trois fois</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHIFFRES -->
+    <section class="stats">
+      <div class="container stats__grid">
+        <div class="reveal"><strong data-count="4.2" data-dec="1">0</strong><span>Note Google</span></div>
+        <div class="reveal" style="--d:.08s"><strong data-count="6600" data-plus>0</strong><span>Avis clients</span></div>
+        <div class="reveal" style="--d:.16s"><strong>3</strong><span>Espaces : salle, terrasse, salon</span></div>
+        <div class="reveal" style="--d:.24s"><strong>23h</strong><span>Ouvert jusqu’à</span></div>
+      </div>
+    </section>
+
+    <!-- GALERIE -->
+    <section class="section" id="galerie">
+      <div class="container">
+        <div class="head center"><span class="eyebrow reveal">Galerie</span><h2 class="reveal" style="--d:.08s">Un avant-goût <em>en images</em></h2></div>
+        <div class="gallery" id="gallery"></div>
+      </div>
+    </section>
+
+    <!-- RÉSERVATION -->
+    <section class="section section--dark pattern-dark" id="reserver">
+      <div class="container booking">
+        <div class="booking__intro">
+          <span class="eyebrow reveal">Réservation</span>
+          <h2 class="reveal" style="--d:.08s">Réservez <em>votre table</em></h2>
+          <p class="reveal" style="--d:.14s">Choisissez la date, l’heure et l’espace. Nous vous confirmons par téléphone. Pour un groupe de plus de 12 personnes, nous vous proposons le salon privé.</p>
+          <div class="hours reveal" style="--d:.2s" id="hoursBox"></div>
+          <a class="btn btn--ghost reveal" style="--d:.26s" id="callBtn">Appeler le restaurant</a>
+        </div>
+        <form class="booking__form reveal" style="--d:.1s" id="bookForm" novalidate>
+          <div class="steps"><span class="on">1. Votre table</span><span>2. Vos coordonnées</span></div>
+          <div class="fstep" data-step="1">
+            <label>Nombre de personnes</label>
+            <div class="guests" id="guests"></div>
+            <div class="row">
+              <div class="field"><label for="date">Date</label><input type="date" id="date" name="date" required /></div>
+              <div class="field"><label for="time">Heure</label><select id="time" name="time" required></select></div>
+            </div>
+            <label>Espace</label>
+            <div class="seats">
+              <input type="radio" name="seating" id="s-salle" value="salle" checked /><label for="s-salle"><b>Salle</b><small>Ambiance traditionnelle</small></label>
+              <input type="radio" name="seating" id="s-terrasse" value="terrasse" /><label for="s-terrasse"><b>Terrasse</b><small>En plein air</small></label>
+              <input type="radio" name="seating" id="s-salon" value="salon" /><label for="s-salon"><b>Salon privé</b><small>Groupes & événements</small></label>
+            </div>
+            <button type="button" class="btn btn--gold btn--block" id="next">Continuer →</button>
+          </div>
+          <div class="fstep" data-step="2" hidden>
+            <div class="recap" id="recap"></div>
+            <div class="row">
+              <div class="field"><label for="name">Nom complet</label><input id="name" name="name" autocomplete="name" required /></div>
+              <div class="field"><label for="phone">Téléphone</label><input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+212 6…" required /></div>
+            </div>
+            <div class="row">
+              <div class="field"><label for="email">E-mail <small>(facultatif)</small></label><input id="email" name="email" type="email" autocomplete="email" /></div>
+              <div class="field"><label for="occasion">Occasion</label><select id="occasion" name="occasion"><option value="">Aucune</option><option>Anniversaire</option><option>Dîner romantique</option><option>Repas d’affaires</option><option>Fête de famille</option></select></div>
+            </div>
+            <div class="field"><label for="notes">Une demande particulière ?</label><textarea id="notes" name="notes" rows="2" placeholder="Allergies, chaise bébé, méchoui sur commande…"></textarea></div>
+            <div class="form-error" id="bookErr" hidden></div>
+            <div class="row row--btns"><button type="button" class="btn btn--ghost" id="back">← Retour</button><button class="btn btn--gold" type="submit">Confirmer la réservation</button></div>
+          </div>
+          <div class="fstep done" data-step="3" hidden></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- INFOS / CONTACT -->
+    <section class="section" id="infos">
+      <div class="container infos">
+        <div>
+          <span class="eyebrow reveal">Nous trouver</span>
+          <h2 class="reveal" style="--d:.08s">Venez <em>nous voir</em></h2>
+          <div class="info-list">
+            <div class="reveal" style="--d:.12s"><small>Adresse</small><b id="addr"></b></div>
+            <div class="reveal" style="--d:.16s"><small>Horaires</small><b id="hoursInline"></b></div>
+            <div class="reveal" style="--d:.2s"><small>Budget</small><b id="price"></b></div>
+            <div class="reveal" style="--d:.24s"><small>Services</small><b>Terrasse · Salon privé · Cocktails</b></div>
+          </div>
+          <div class="info-btns reveal" style="--d:.28s"><a class="btn btn--dark" id="routeBtn" target="_blank" rel="noopener">Itinéraire</a><a class="btn btn--line" id="callBtn2">Appeler</a></div>
+          <form class="contact reveal" id="contactForm" novalidate>
+            <h3>Événement privé ? Une question ?</h3>
+            <div class="row"><input name="name" placeholder="Votre nom" /><input name="contact" placeholder="Téléphone ou e-mail" /></div>
+            <textarea name="message" rows="3" placeholder="Votre message"></textarea>
+            <button class="btn btn--dark">Envoyer</button>
+          </form>
+        </div>
+        <div class="map reveal-img"><iframe id="map" title="Carte : Dar Naji, Rabat" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer pattern-dark">
+    <div class="container footer__inner">
+      <div class="footer__brand"><span class="brand__ar">دار ناجي</span><span class="footer__name">Dar Naji</span><p>Cuisine marocaine · Rabat</p></div>
+      <div class="footer__cols">
+        <div><h4>Le restaurant</h4><a href="#maison">La maison</a><a href="#carte">La carte</a><a href="#galerie">Galerie</a></div>
+        <div><h4>Réserver</h4><a href="#reserver">En ligne</a><a id="footCall">Par téléphone</a><a id="footRoute" target="_blank" rel="noopener">Itinéraire</a></div>
+      </div>
+    </div>
+    <div class="container footer__bottom"><span>© <span id="year"></span> Dar Naji · Rabat</span><a href="admin.html">Espace gérant</a></div>
+  </footer>
+
+  <div class="mobile-bar"><a id="mCall">Appeler</a><a id="mRoute" target="_blank" rel="noopener">Itinéraire</a><a href="#reserver" class="on">Réserver</a></div>
+  <div class="lightbox" id="lightbox" hidden><button aria-label="Fermer">✕</button><img alt="" /></div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

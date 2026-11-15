@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Espace gérant · Dar Naji</title>
+  <link rel="icon" href="images/favicon.svg" type="image/svg+xml" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Jost:wght@400;500;600&family=Amiri:wght@700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    body { background: var(--cream-2); }
+    .adm-top { background: var(--green); color: var(--cream); padding: 18px 0; }
+    .adm-top .container { display: flex; align-items: center; gap: 16px; }
+    .adm-top a { margin-left: auto; opacity: .8; font-size: 15px; }
+    .login { max-width: 400px; margin: 12vh auto; background: var(--cream); padding: 36px; border-radius: 24px; box-shadow: 0 40px 80px -40px rgba(0,0,0,.4); }
+    .login h1 { font-size: 40px; margin-bottom: 18px; }
+    .login input { width: 100%; height: 52px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line); margin-bottom: 14px; }
+    .adm { padding: 36px 0 80px; }
+    .adm h1 { font-size: 44px; }
+    .bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0 24px; }
+    .bar button { padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-size: 14px; }
+    .bar button.on { background: var(--green); color: var(--cream); border-color: var(--green); }
+    .kp { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
+    .kp div { background: #fff; border-radius: 16px; padding: 16px 18px; }
+    .kp b { display: block; font: 600 34px var(--serif); }
+    .kp small { color: var(--muted); }
+    .res { display: grid; grid-template-columns: 110px 1fr auto; gap: 16px; align-items: center; background: #fff; border-radius: 16px; padding: 16px 18px; margin-bottom: 10px; animation: up .5s var(--ease) both; }
+    .res .when b { display: block; font: 600 24px var(--serif); }
+    .res .when small { color: var(--muted); text-transform: capitalize; }
+    .res .who b { font-weight: 600; } .res .who small { display: block; color: var(--muted); font-size: 14px; }
+    .res .acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .res .acts button { padding: 7px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-size: 13px; }
+    .res .acts button:hover { border-color: var(--green); }
+    .st { display: inline-block; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #fff4cf; color: #6b4e00; text-transform: capitalize; margin-bottom: 4px; }
+    .st--confirmée { background: #e1f2e8; color: #1f6b43; } .st--annulée { background: #eee; color: #888; } .st--venue { background: #e3ebff; color: #1d4ed8; }
+    .msg { background: #fff; border-radius: 16px; padding: 16px 18px; margin-bottom: 10px; }
+    .msg.unread { border-left: 4px solid var(--terra); }
+    .empty { text-align: center; color: var(--muted); padding: 50px 0; }
+    @media (max-width: 760px) { .res { grid-template-columns: 1fr; } .res .acts { justify-content: flex-start; } .kp { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="adm-top"><div class="container"><span class="brand"><span class="brand__ar">دار ناجي</span><span class="brand__fr">Espace gérant</span></span><a href="index.html">← Voir le site</a></div></div>
+  <div id="app" class="container"></div>
+  <div class="toast" id="toast" hidden></div>
+  <script type="module">
+    import { API_URL } from './js/config.js';
+    const $ = (s, el = document) => el.querySelector(s);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let token = sessionStorage.getItem('dn.admin') || '';
+    let filter = 'à venir';
+    const toast = (m) => { const t = $('#toast'); t.textContent = m; t.hidden = false; setTimeout(() => (t.hidden = true), 3500); };
+
+    async function api(path, opts = {}) {
+      let res;
+      try { res = await fetch(API_URL + '/api' + path, { ...opts, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } }); }
+      catch { throw new Error(`Serveur injoignable (${API_URL}). Lancez le backend.`); }
+      const d = await res.json().catch(() => ({}));
+      if (res.status === 401 && path !== '/admin/login') { token = ''; sessionStorage.removeItem('dn.admin'); login(d.error); throw new Error(d.error); }
+      if (!res.ok) throw new Error(d.error || 'Erreur ' + res.status);
+      return d;
+    }
+
+    function login(msg = '') {
+      $('#app').innerHTML = `<form class="login" id="lf"><h1>Connexion</h1>
+        <p class="muted">Le mot de passe s’affiche dans la fenêtre du serveur au démarrage (ou dans <code>backend/data/admin-password.txt</code>).</p>
+        ${msg ? `<div class="form-error">${esc(msg)}</div>` : ''}
+        <input type="password" name="pw" placeholder="Mot de passe" autofocus required /><button class="btn btn--dark btn--block">Se connecter</button></form>`;
+      $('#lf').onsubmit = async (e) => {
+        e.preventDefault();
+        try { token = (await api('/admin/login', { method: 'POST', body: JSON.stringify({ password: e.target.pw.value }) })).token; sessionStorage.setItem('dn.admin', token); load(); }
+        catch (err) { login(err.message); }
+      };
+    }
+
+    async function load() {
+      const { items, messages } = await api('/admin/reservations');
+      const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      const groups = {
+        'à venir': items.filter(r => r.date >= today && r.status !== 'annulée'),
+        "aujourd'hui": items.filter(r => r.date === today),
+        'en attente': items.filter(r => r.status === 'en attente' && r.date >= today),
+        'passées': items.filter(r => r.date < today).reverse(),
+        'toutes': items,
+      };
+      const list = groups[filter];
+      const todayGuests = groups["aujourd'hui"].filter(r => r.status !== 'annulée').reduce((s, r) => s + r.guests, 0);
+      $('#app').innerHTML = `<div class="adm"><h1>Réservations</h1>
+        <div class="kp"><div><b>${groups["aujourd'hui"].length}</b><small>Aujourd’hui</small></div><div><b>${todayGuests}</b><small>Couverts aujourd’hui</small></div>
+          <div><b>${groups['en attente'].length}</b><small>À confirmer</small></div><div><b>${messages.filter(m => !m.read).length}</b><small>Messages non lus</small></div></div>
+        <div class="bar">${Object.keys(groups).map(k => `<button data-f="${k}" class="${k === filter ? 'on' : ''}">${k} (${groups[k].length})</button>`).join('')}<button id="refresh" style="margin-left:auto">↻ Actualiser</button></div>
+        ${list.length ? list.map((r, i) => `<div class="res" style="animation-delay:${i * 0.03}s">
+          <div class="when"><b>${r.time.replace(':', 'h')}</b><small>${new Date(r.date + 'T12:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}</small></div>
+          <div class="who"><span class="st st--${r.status}">${r.status}</span><br/><b>${esc(r.name)}</b> · ${r.guests} pers. · ${esc(r.seatingLabel)} ${r.occasion ? '· ' + esc(r.occasion) : ''}
+            <small><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>${r.email ? ' · ' + esc(r.email) : ''} · ${r.code}</small>${r.notes ? `<small>“${esc(r.notes)}”</small>` : ''}</div>
+          <div class="acts">${['confirmée', 'venue', 'annulée'].filter(s => s !== r.status).map(s => `<button data-id="${r.id}" data-s="${s}">${s === 'confirmée' ? '✓ Confirmer' : s === 'venue' ? 'Venue' : 'Annuler'}</button>`).join('')}</div>
+        </div>`).join('') : '<div class="empty">Aucune réservation ici.</div>'}
+        <h1 style="font-size:34px;margin-top:40px">Messages</h1><div style="margin-top:16px">
+        ${messages.length ? messages.map(m => `<div class="msg ${m.read ? '' : 'unread'}"><b>${esc(m.name)}</b> · ${esc(m.contact)} <small class="muted">· ${new Date(m.createdAt).toLocaleString('fr-FR')}</small><p style="margin:6px 0 0">${esc(m.message)}</p>${m.read ? '' : `<button class="btn btn--line btn--sm" style="margin-top:10px" data-read="${m.id}">Marquer comme lu</button>`}</div>`).join('') : '<div class="empty">Aucun message.</div>'}</div></div>`;
+      document.querySelectorAll('[data-f]').forEach(b => (b.onclick = () => { filter = b.dataset.f; load(); }));
+      $('#refresh').onclick = load;
+      document.querySelectorAll('[data-s]').forEach(b => (b.onclick = async () => {
+        try { await api('/admin/reservations/' + b.dataset.id, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.s }) }); toast('Réservation ' + b.dataset.s); load(); } catch (e) { toast(e.message); }
+      }));
+      document.querySelectorAll('[data-read]').forEach(b => (b.onclick = async () => { await api('/admin/messages/' + b.dataset.read, { method: 'PATCH' }); load(); }));
+    }
+
+    token ? load().catch(() => {}) : login();
+    setInterval(() => token && load().catch(() => {}), 60000);
+  </script>
+</body>
+</html>

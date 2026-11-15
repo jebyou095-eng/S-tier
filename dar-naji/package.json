@@ -1,0 +1,11 @@
+{
+  "name": "dar-naji",
+  "private": true,
+  "type": "module",
+  "description": "Site du restaurant Dar Naji (Rabat). Frontend et backend dans des dossiers séparés.",
+  "scripts": {
+    "install:all": "npm --prefix backend install",
+    "dev": "node dev.js",
+    "test": "npm --prefix backend test"
+  }
+}

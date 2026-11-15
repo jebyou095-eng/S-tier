@@ -25,3 +25,8 @@ marketplace/backend/data/
 marketplace/backend/uploads/*
 !marketplace/backend/uploads/.gitkeep
 marketplace/backend/.env
+
+# Dar Naji
+dar-naji/**/node_modules/
+dar-naji/backend/data/
+dar-naji/backend/.env

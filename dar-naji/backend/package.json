@@ -1,0 +1,18 @@
+{
+  "name": "dar-naji-backend",
+  "version": "1.0.0",
+  "description": "API du site Dar Naji : carte, réservations, contact, espace gérant",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node src/smoke-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.22.3"
+  }
+}
