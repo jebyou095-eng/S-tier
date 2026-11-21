@@ -5,12 +5,12 @@ import { h, modal } from './ui.js';
 import { t, fmt } from './i18n.js';
 import { icon } from './icons.js';
 import { analyze, adjustImage, refineMask, brush, maskBounds, blurImage, ADJUST_KEYS, ZERO_ADJUST } from './imaging.js';
-import { findDish } from './cutout.js';
+import { findDish, prepareCutout } from './cutout.js';
 
 const WORK = 1440; // working size (longest side), so a square crop still has ~1080 px
 const FINAL = 1080; // saved edit (longest side)
 const PREVIEW = 640; // live preview size (longest side)
-const MASK_MAX = 720; // background mask resolution
+const MASK_MAX = 560; // background mask resolution
 const ORIG_MAX = 1600; // kept original
 const THUMB = 320;
 export const BACKGROUNDS = { original: null, transparent: null, card: '#151D1A', dark: '#0E1412', light: '#F4F6F5', blur: null };
@@ -248,7 +248,7 @@ export async function editPhoto(source) {
       paintAt(e);
     });
     canvas.addEventListener('pointermove', (e) => { if (painting) paintAt(e); });
-    const stop = () => { painting = false; };
+    const stop = () => { if (painting) { painting = false; panelDraw(); } }; // enables Undo
     canvas.addEventListener('pointerup', stop);
     canvas.addEventListener('pointercancel', stop);
 
@@ -378,7 +378,11 @@ export async function editPhoto(source) {
 
     panelDraw();
     draw();
-    requestAnimationFrame(() => { canvas.dataset.openMs = String(Math.round(performance.now() - started)); });
+    requestAnimationFrame(() => {
+      canvas.dataset.openMs = String(Math.round(performance.now() - started));
+      // Get the background remover ready while you look at the photo, so "Remove background" is quick
+      setTimeout(() => { prepareCutout().catch(() => {}); }, 600);
+    });
     return h('div', { class: 'ed' },
       h('div', { class: 'ed-top' },
         h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, t('cancel')),

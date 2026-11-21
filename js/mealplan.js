@@ -144,10 +144,8 @@ export function detectDayType(state, day = dayKey(), today = dayKey()) {
   // Which program day: the coach's next day for today, then the following ones in order
   const a = analyze(gym, today);
   let idx = nextDay(gym, prog, a, today).idx;
-  for (let d = today; d < day; d = addDays(d, 1)) {
-    const trainedThatDay = d === today ? (gym.log || []).some((s) => s.day === d) : trainDays.includes(parseDay(d).getDay());
-    if (trainedThatDay || (d !== today && trainDays.includes(parseDay(d).getDay()))) idx = (idx + 1) % prog.days.length;
-  }
+  // Each training day between today and that day moves one step through the program
+  for (let d = today; d < day; d = addDays(d, 1)) if (trainDays.includes(parseDay(d).getDay())) idx = (idx + 1) % prog.days.length;
   return { type: typeOfProgramDay(prog.days[idx][0]), source: 'schedule' };
 }
 
@@ -158,6 +156,7 @@ function hash(str) {
   return ((x >>> 0) % 10000) / 10000;
 }
 
+/** Eggs in one serving. */
 export const recipeEggs = (r) => (r ? r.eggs || 0 : 0);
 export const optionsFor = (slot, m) => allRecipes().filter((r) => r.slot === slot && !(m.hide || []).includes(r.id));
 
@@ -200,8 +199,9 @@ export function chooseDay(m, day, type) {
   const eggsOf = (slot) => recipeEggs(recipeById(chosen[slot]));
   if (!chosen.lunch) chosen.lunch = pick('lunch', day, m.plan, m, { type })?.id;
   if (!chosen.breakfast) chosen.breakfast = pick('breakfast', day, m.plan, m, { eggsLeft: EGG_LIMIT - eggsOf('lunch'), type })?.id;
-  if (!chosen.dinner) chosen.dinner = pick('dinner', day, m.plan, m, { eggsLeft: EGG_LIMIT - eggsOf('lunch') - eggsOf('breakfast'), type })?.id;
   for (const slot of ['shake', 'snack', 'pregym']) if (!chosen[slot]) chosen[slot] = pick(slot, day, m.plan, m, { type })?.id;
+  const small = eggsOf('snack') + (type === 'rest' ? 0 : eggsOf('pregym'));
+  if (!chosen.dinner) chosen.dinner = pick('dinner', day, m.plan, m, { eggsLeft: EGG_LIMIT - eggsOf('lunch') - eggsOf('breakfast') - small, type })?.id;
   chosen.bedtime = 'louiza';
   for (const k of Object.keys(chosen)) if (!chosen[k]) delete chosen[k];
   m.plan[day] = chosen;
@@ -209,8 +209,10 @@ export function chooseDay(m, day, type) {
 }
 
 // ---------- building and sizing a day ----------
+/** One serving's items (a recipe written for a batch, like the brownie tray, is divided). */
 function itemsOf(r, { carbFactor = 1 } = {}) {
-  return (r.ing || []).map(([id, g, o = {}]) => [id, o.carb ? Math.round(g * carbFactor) : g, o]);
+  const k = 1 / (r.serves || 1);
+  return (r.ing || []).map(([id, g, o = {}]) => [id, (o.carb ? Math.round(g * carbFactor) : g) * k, k !== 1 && o.n ? { ...o, n: Math.round(o.n * k * 10) / 10 } : o]);
 }
 
 /**
@@ -258,7 +260,7 @@ export function buildDay(m, day, type, { nextDayBonus = null } = {}) {
   const di = recipeById(chosen.dinner);
   if (di) {
     const items = itemsOf(di);
-    const eggsSoFar = recipeEggs(bf) + recipeEggs(lu) + recipeEggs(di);
+    const eggsSoFar = eggsCount(meals) + recipeEggs(di);
     if (di.sides || di.sidesNoEggs) {
       const eggsAllowed = di.sidesNoEggs ? 0 : Math.max(0, Math.min(2, EGG_LIMIT - eggsSoFar));
       if (eggsAllowed) items.push(['egg', eggsAllowed * 50, { n: eggsAllowed, side: true, en: eggsAllowed === 2 ? '2 eggs' : '1 egg', ar: eggsAllowed === 2 ? 'جوج بيضات' : 'بيضة' }]);

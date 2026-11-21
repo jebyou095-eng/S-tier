@@ -19,3 +19,4 @@ android/.cache/
 dist/*.apk
 dist/*.idsig
 private/
+screenshots-v1.8/

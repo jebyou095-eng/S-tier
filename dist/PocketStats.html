@@ -2,7 +2,7 @@
 <html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-vdjDwfsLN2AbwqEi76ILjXjik20QSwOkRZG+QYjGP2U=' 'sha256-/BzpOQgJ/ArHtuyehrv0qgTsh81nnyjMJBJtXH8vr0w=' 'wasm-unsafe-eval'; style-src 'sha256-0mEyNB6FHqCA+1oY+OQV1Ozul3o13LGwZa2JicOP+dI='; font-src data:; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-18yPad1wvc86wAya5XK/KsufQTK6N5xy34QuTbkYZS0=' 'sha256-GegIOVW8ci5vTI5dSHNpmpCOkPW9u5C9mK7psvBEsMA=' 'sha256-y9n6giBefrbyCh5xGDFHTi9gSOFDtlGG/BdkeX6XdJs=' 'sha256-vdjDwfsLN2AbwqEi76ILjXjik20QSwOkRZG+QYjGP2U=' 'sha256-lwUF1RTN7maTE4r1q7/nZDmOEjGePXbDCZ0QxL+Rr80=' 'wasm-unsafe-eval'; style-src 'sha256-ZX26pSfp6Lo4FRaZ8GZ5ftDi+mPirEOXlOSeAyO9blM='; font-src {font_src}; img-src data: blob:; media-src blob: mediastream:; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com blob:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0E1412">
@@ -57,7 +57,7 @@ body {
   margin: 0; background: var(--bg); color: var(--text); font: 400 15px/1.45 var(--font);
   -webkit-tap-highlight-color: transparent; overflow-x: hidden;
 }
-#app { max-width: 560px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px calc(96px + env(safe-area-inset-bottom)); }
+#app { max-width: 560px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px calc(176px + env(safe-area-inset-bottom)); }
 body.hide-content #app, body.hide-content #tabs { visibility: hidden; }
 section { display: flex; flex-direction: column; gap: 14px; }
 
@@ -534,6 +534,7 @@ dialog.editor::backdrop { background: var(--bg); }
   .stats.four, .macro-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .slider { grid-template-columns: 80px 1fr 34px 40px; }
 }
+.macro-grid .mbar .row { flex-direction: column; align-items: flex-start; gap: 2px; }
 </style>
 </head>
 <body>
@@ -6920,7 +6921,12 @@ async function decryptObj(k, iv, ct) {
   return JSON.parse(dec.decode(pt));
 }
 
-const toB64 = (bytes) => btoa(String.fromCharCode(...bytes));
+// In chunks: a backup with photos is several MB, too big to pass as one argument list.
+function toB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 function cryptoAvailable() {
@@ -8271,6 +8277,10 @@ const EN = {
   "special.ramadan.body": "Train lighter. The best times are about 60–90 min before iftar (eat right after) or 1–2 h after iftar. Drink plenty of water between iftar and suhoor, keep protein at both meals, and cut volume by about a third rather than skipping training entirely.",
   "refs.title": "Research & guidelines this app is based on",
   "refs.intro": "Tap to look up the paper on PubMed (US National Library of Medicine). This opens your browser and is the only time the Gym section uses the internet.",
+  // ---- extra ----
+  "meals.guess": "{type}?",
+  // ---- extra2 ----
+  "food.servingN": "1 serving ({g} g)",
 };
 
 return { EN };
@@ -9385,6 +9395,10 @@ const AR = {
   "special.ramadan.body": "تمرن خفيف. أحسن وقت هو تقريبا 60 حتى 90 دقيقة قبل الفطور (وكول مباشرة من بعد) ولا ساعة حتى جوج من بعد الفطور. شرب بزاف ديال الما بين الفطور والسحور، خلي البروتين فجوج الوجبات، ونقص الحجم بتقريبا التلت عوض ما تحبس التمرين كاملا.",
   "refs.title": "الأبحاث والتوجيهات اللي مبني عليها التطبيق",
   "refs.intro": "ورك باش تقلب على البحث فPubMed (المكتبة الوطنية للطب فأمريكا). هادشي كيحل المتصفح ديالك وهي المرة الوحيدة اللي قسم الجيم كيستعمل فيها الأنترنيت.",
+  // ---- extra ----
+  "meals.guess": "{type}؟",
+  // ---- extra2 ----
+  "food.servingN": "حصة ({g} غ)",
 };
 
 return { AR };
@@ -10433,8 +10447,9 @@ function scanBarcode() {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        });
-      } catch {
+        }).catch(() => navigator.mediaDevices.getUserMedia({ audio: false, video: true })); // retry with the simplest request
+      } catch (err) {
+        console.warn('camera:', err?.name, err?.message);
         status.textContent = t('bc.denied');
         return;
       }
@@ -12629,10 +12644,8 @@ function detectDayType(state, day = dayKey(), today = dayKey()) {
   // Which program day: the coach's next day for today, then the following ones in order
   const a = analyze(gym, today);
   let idx = nextDay(gym, prog, a, today).idx;
-  for (let d = today; d < day; d = addDays(d, 1)) {
-    const trainedThatDay = d === today ? (gym.log || []).some((s) => s.day === d) : trainDays.includes(parseDay(d).getDay());
-    if (trainedThatDay || (d !== today && trainDays.includes(parseDay(d).getDay()))) idx = (idx + 1) % prog.days.length;
-  }
+  // Each training day between today and that day moves one step through the program
+  for (let d = today; d < day; d = addDays(d, 1)) if (trainDays.includes(parseDay(d).getDay())) idx = (idx + 1) % prog.days.length;
   return { type: typeOfProgramDay(prog.days[idx][0]), source: 'schedule' };
 }
 
@@ -12643,6 +12656,7 @@ function hash(str) {
   return ((x >>> 0) % 10000) / 10000;
 }
 
+/** Eggs in one serving. */
 const recipeEggs = (r) => (r ? r.eggs || 0 : 0);
 const optionsFor = (slot, m) => allRecipes().filter((r) => r.slot === slot && !(m.hide || []).includes(r.id));
 
@@ -12685,8 +12699,9 @@ function chooseDay(m, day, type) {
   const eggsOf = (slot) => recipeEggs(recipeById(chosen[slot]));
   if (!chosen.lunch) chosen.lunch = pick('lunch', day, m.plan, m, { type })?.id;
   if (!chosen.breakfast) chosen.breakfast = pick('breakfast', day, m.plan, m, { eggsLeft: EGG_LIMIT - eggsOf('lunch'), type })?.id;
-  if (!chosen.dinner) chosen.dinner = pick('dinner', day, m.plan, m, { eggsLeft: EGG_LIMIT - eggsOf('lunch') - eggsOf('breakfast'), type })?.id;
   for (const slot of ['shake', 'snack', 'pregym']) if (!chosen[slot]) chosen[slot] = pick(slot, day, m.plan, m, { type })?.id;
+  const small = eggsOf('snack') + (type === 'rest' ? 0 : eggsOf('pregym'));
+  if (!chosen.dinner) chosen.dinner = pick('dinner', day, m.plan, m, { eggsLeft: EGG_LIMIT - eggsOf('lunch') - eggsOf('breakfast') - small, type })?.id;
   chosen.bedtime = 'louiza';
   for (const k of Object.keys(chosen)) if (!chosen[k]) delete chosen[k];
   m.plan[day] = chosen;
@@ -12694,8 +12709,10 @@ function chooseDay(m, day, type) {
 }
 
 // ---------- building and sizing a day ----------
+/** One serving's items (a recipe written for a batch, like the brownie tray, is divided). */
 function itemsOf(r, { carbFactor = 1 } = {}) {
-  return (r.ing || []).map(([id, g, o = {}]) => [id, o.carb ? Math.round(g * carbFactor) : g, o]);
+  const k = 1 / (r.serves || 1);
+  return (r.ing || []).map(([id, g, o = {}]) => [id, (o.carb ? Math.round(g * carbFactor) : g) * k, k !== 1 && o.n ? { ...o, n: Math.round(o.n * k * 10) / 10 } : o]);
 }
 
 /**
@@ -12743,7 +12760,7 @@ function buildDay(m, day, type, { nextDayBonus = null } = {}) {
   const di = recipeById(chosen.dinner);
   if (di) {
     const items = itemsOf(di);
-    const eggsSoFar = recipeEggs(bf) + recipeEggs(lu) + recipeEggs(di);
+    const eggsSoFar = eggsCount(meals) + recipeEggs(di);
     if (di.sides || di.sidesNoEggs) {
       const eggsAllowed = di.sidesNoEggs ? 0 : Math.max(0, Math.min(2, EGG_LIMIT - eggsSoFar));
       if (eggsAllowed) items.push(['egg', eggsAllowed * 50, { n: eggsAllowed, side: true, en: eggsAllowed === 2 ? '2 eggs' : '1 egg', ar: eggsAllowed === 2 ? 'جوج بيضات' : 'بيضة' }]);
@@ -13298,7 +13315,7 @@ async function loadWasmBackend(tf) {
   }
   const bundled = document.getElementById('lib-tfwasm-bin');
   let url = 'js/vendor/tfjs-backend-wasm-simd.wasm';
-  if (bundled) {
+  if (bundled && bundled.textContent.trim()) {
     const bytes = Uint8Array.from(atob(bundled.textContent.trim()), (c) => c.charCodeAt(0));
     url = URL.createObjectURL(new Blob([bytes], { type: 'application/wasm' }));
     bundled.remove();
@@ -13454,12 +13471,12 @@ const { h, modal } = __m_ui;
 const { t, fmt } = __m_i18n;
 const { icon } = __m_icons;
 const { analyze, adjustImage, refineMask, brush, maskBounds, blurImage, ADJUST_KEYS, ZERO_ADJUST } = __m_imaging;
-const { findDish } = __m_cutout;
+const { findDish, prepareCutout } = __m_cutout;
 
 const WORK = 1440; // working size (longest side), so a square crop still has ~1080 px
 const FINAL = 1080; // saved edit (longest side)
 const PREVIEW = 640; // live preview size (longest side)
-const MASK_MAX = 720; // background mask resolution
+const MASK_MAX = 560; // background mask resolution
 const ORIG_MAX = 1600; // kept original
 const THUMB = 320;
 const BACKGROUNDS = { original: null, transparent: null, card: '#151D1A', dark: '#0E1412', light: '#F4F6F5', blur: null };
@@ -13697,7 +13714,7 @@ async function editPhoto(source) {
       paintAt(e);
     });
     canvas.addEventListener('pointermove', (e) => { if (painting) paintAt(e); });
-    const stop = () => { painting = false; };
+    const stop = () => { if (painting) { painting = false; panelDraw(); } }; // enables Undo
     canvas.addEventListener('pointerup', stop);
     canvas.addEventListener('pointercancel', stop);
 
@@ -13827,7 +13844,11 @@ async function editPhoto(source) {
 
     panelDraw();
     draw();
-    requestAnimationFrame(() => { canvas.dataset.openMs = String(Math.round(performance.now() - started)); });
+    requestAnimationFrame(() => {
+      canvas.dataset.openMs = String(Math.round(performance.now() - started));
+      // Get the background remover ready while you look at the photo, so "Remove background" is quick
+      setTimeout(() => { prepareCutout().catch(() => {}); }, 600);
+    });
     return h('div', { class: 'ed' },
       h('div', { class: 'ed-top' },
         h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, t('cancel')),
@@ -14135,7 +14156,7 @@ function viewWeek(api) {
     const nextBatch = prep ? [...new Set([0, 1, 2].flatMap((i) => ['lunch', 'dinner'].map((s) => m.plan[addDays(d, i)]?.[s])).filter((id) => recipeById(id)?.batch))] : [];
     return h('article', { class: `card week-day${d === today ? ' today' : ''}` },
       h('h3', {}, h('span', {}, d === today ? t('day.today') : dateText(parseDay(d), { weekday: 'long', day: 'numeric', month: 'short' })),
-        h('span', { class: `type-pill${type === 'rest' ? ' rest' : ''}` }, det.type ? t(`daytype.${type}`) : `${t(`daytype.${type}`)}?`)),
+        h('span', { class: `type-pill${type === 'rest' ? ' rest' : ''}` }, det.type ? t(`daytype.${type}`) : t('meals.guess', { type: t(`daytype.${type}`) }))),
       h('ul', {}, ...p.meals.filter((x) => x.slot !== 'bedtime').map((meal) => h('li', {},
         h('span', { class: 's' }, `${meal.time} ${t(`slot.short.${meal.slot}`)}`),
         h('span', { class: 'grow' }, recipeName(recipeById(meal.recipeId) || { name: meal.recipeId }))))),
@@ -14170,7 +14191,7 @@ function recipeCard(api, r) {
       M(api).fav.includes(r.id) ? h('span', { class: 'fav-mark', 'aria-label': t('rec.favourite') }, icon('star', 'icon-sm')) : null),
     h('div', { class: 'body' },
       h('span', { class: 'nm' }, recipeName(r)),
-      recipeAlt(r) ? h('bdi', { class: 'alt' }, recipeAlt(r)) : null,
+      recipeAlt(r) ? h('bdi', { class: 'alt', lang: isAr() ? 'en' : 'ar' }, recipeAlt(r)) : null,
       h('span', { class: 'mx' }, h('b', {}, fmt(n.kcal)), ` ${t('unit.kcal')} · `, h('b', { class: 'm-p' }, `${fmt(n.p)} ${t('unit.g')}`), ` ${t('macro.proteinLc')}`),
       h('span', { class: 'mx muted' }, `${t('macro.carbsShort')} ${fmt(n.c)} · ${t('macro.fatShort')} ${fmt(n.f)} ${t('unit.g')}`)));
 }
@@ -14212,7 +14233,7 @@ function viewLibrary(api) {
       const hidden = m.hide.includes(r.id);
       return h('button', { class: 'plan-item', type: 'button', onclick: () => { openRecipe = { id: r.id, from: 'recipes' }; servings = 1; mult = {}; api.setSub('recipe'); } },
         h('span', { class: 'grow-wrap' },
-          h('span', { class: 'nm' }, recipeName(r), recipeAlt(r) ? h('bdi', { class: 'muted', css: { 'font-weight': '400' } }, ` · ${recipeAlt(r)}`) : null),
+          h('span', { class: 'nm' }, recipeName(r), recipeAlt(r) ? h('bdi', { class: 'muted', lang: isAr() ? 'en' : 'ar', css: { 'font-weight': '400' } }, ` · ${recipeAlt(r)}`) : null),
           h('span', { class: 'muted small' }, t('meals.kcalP', { kcal: fmt(n.kcal), p: fmt(n.p) }), hidden ? ` · ${t('rec.hidden')}` : '', m.fav.includes(r.id) ? ` · ${t('rec.favourite')}` : '')),
         icon('next', 'icon-sm'));
     })) : h('p', { class: 'muted small' }, t('rec.noMatch')),
@@ -14365,6 +14386,9 @@ function viewRecipePage(api) {
       h('button', { class: 'btn primary', type: 'button', onclick: logIt }, t('rec.logThis', { kcal: fmt(n.kcal) }))),
   ];
 }
+
+/** Back to the recipe list (when the Recipes tab is tapped again). */
+function closeRecipe() { openRecipe = null; }
 
 function viewRecipes(api) {
   return openRecipe ? viewRecipePage(api) : viewLibrary(api);
@@ -14541,7 +14565,7 @@ function mealSettings(api, editProfile) {
 /** Pre-load the 3 starter recipe photos once (Android app only), encrypted like any other photo. */
 async function importStarters(api) {
   const m = M(api);
-  if (m.starterDone) return;
+  if (m.starterDone || !globalThis.POCKET_STATS_LOCAL_DATA) return; // only the Android app carries them
   const r = await fetch('data/starter/index.json', { credentials: 'omit', cache: 'no-store' });
   if (!r.ok) throw new Error('none');
   const index = await r.json();
@@ -14558,7 +14582,7 @@ async function importStarters(api) {
   api.ctx.render();
 }
 
-return { recipeFoodItem, viewMeals, viewRecipes, mealSettings, importStarters };
+return { recipeFoodItem, viewMeals, closeRecipe, viewRecipes, mealSettings, importStarters };
 })();
 const __m_food = (() => {
 // Food tab: today's meals, calorie & macro diary, recipes, barcode scanner, food search.
@@ -14575,7 +14599,7 @@ const { recognizeFood, recognitionMode, preparePhoto, RecognitionError } = __m_r
 const { prepareScanner, fingerprint, learn, match, confidence, plateCoverage, addSize, estimateGrams, medianOf } = __m_foodscan;
 const { freshMeals, normalizeMeals, setCustomRecipes } = __m_mealplan;
 const { RECIPES } = __m_recipes;
-const { viewMeals, viewRecipes, mealSettings, importStarters } = __m_meals;
+const { viewMeals, viewRecipes, mealSettings, importStarters, closeRecipe } = __m_meals;
 
 const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'];
 const LB = 0.45359237;
@@ -14708,6 +14732,7 @@ const catName = (c) => (CAT_KEYS[c] ? t(`cat.${CAT_KEYS[c]}`) : c);
 /** A food's name in your language. Packaged products keep the name printed on the pack. */
 function foodName(food) {
   if (!food) return '';
+  // (packaged products keep their printed name; see nameLang)
   if (isAr()) {
     if (food.ar) return food.ar;
     if (food.recipeName) return food.recipeName.ar || food.name;
@@ -14715,6 +14740,21 @@ function foodName(food) {
   return food.name;
 }
 /** Second line: the other language, or for packaged products in Arabic the category. */
+// Serving sizes: common ones translated; any other printed label becomes "1 serving (N g)" in Arabic
+const SERVING_AR = {
+  '1 bowl': 'زلافة', '1 can': 'حكة', '1 cup': 'كاس', '1 cup dry': 'كاس ناشف', '1 date': 'تمرة', '1 fillet': 'فيلي', '1 glass': 'كاس', '1 handful': 'قبضة',
+  '1 large egg': 'بيضة كبيرة', '1 large white': 'بياض بيضة كبيرة', '1 medium': 'وحدة متوسطة', '1 oz': 'أونصة', '1 piece': 'طرف', '1 plate': 'طبسيل', '1 portion': 'حصة',
+  '1 pot': 'بوط', '1 scoop': 'مغرفة', '1 slice': 'طرف', '1 steak': 'ستيك', '1 tbsp': 'معلقة كبيرة', '1 thigh': 'فخذ', '1 tortilla': 'تورتيا', '2 squares': 'جوج مربعات',
+  '2 tbsp': 'جوج معالق كبار', '4 skewers': '4 قضبان', '8 olives': '8 زيتونات', 'small box': 'علبة صغيرة', '¼ cup': 'ربع كاس', '¼ loaf': 'ربع خبزة', '½ avocado': 'نص لافوكا',
+  '½ block': 'نص قالب', '½ cup': 'نص كاس', '1 egg': 'بيضة', '1 clove': 'فص', '1 fruit': 'حبة', '1 lemon': 'حامضة', '1 bun': 'خبيزة', '1 sandwich': 'صندويتش', '1 cookie': 'بيسكويتة',
+};
+function servingText(food) {
+  const l = food.servingLabel || '';
+  if (!isAr() || /^[\d.,]+ ?(g|ml)$/i.test(l)) return l.replace(/\bg\b/, t('unit.g')).replace(/\bml\b/, t('unit.ml'));
+  return SERVING_AR[l] || t('food.servingN', { g: fmt(food.serving) });
+}
+
+const altLang = (food) => (isAr() ? (food.ar ? 'en' : 'ar') : 'ar');
 function foodAlt(food) {
   if (isAr()) return food.ar ? food.name : food.cat ? catName(food.cat) : '';
   return food.ar || '';
@@ -14860,9 +14900,9 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
     };
     grams.addEventListener('input', update);
     const quick = [
-      [food.servingLabel !== '100 g' ? food.servingLabel : null, food.serving],
+      [food.servingLabel !== '100 g' ? servingText(food) : null, food.serving],
       [t('food.halfServing'), food.serving / 2], [t('food.twoServings'), food.serving * 2], [t('food.g100'), 100],
-    ].filter(([l]) => l).map(([l, g]) => h('button', { type: 'button', class: 'chip', onclick: () => { grams.value = String(Math.round(g * 10) / 10); update(); } }, l === food.servingLabel && !/\bg\b/.test(l) ? `${l} (${fmt(g)} ${t('unit.g')})` : l));
+    ].filter(([l]) => l).map(([l, g], i) => h('button', { type: 'button', class: 'chip', onclick: () => { grams.value = String(Math.round(g * 10) / 10); update(); } }, i === 0 && !/\d+ ?(g|غ)\b/.test(l) && !/\(/.test(l) ? `${l} (${fmt(g)} ${t('unit.g')})` : l));
     update();
     const thumb = foodThumb(food, { size: 'lg', photos: photosOn(), userPhoto: F().myPhotos[food.id] });
     const alt = foodAlt(food);
@@ -14882,9 +14922,9 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
       h('div', { class: 'thumb-col' }, thumb,
         h('button', { type: 'button', class: 'link small row', onclick: () => addMyPhoto(food, thumb) }, icon('camera', 'icon-sm'), F().myPhotos[food.id] ? t('photo.change') : t('photo.add'))),
       h('div', { class: 'grow-wrap' },
-        h('h2', {}, foodName(food)),
-        alt ? h('p', { class: 'muted small' }, h('bdi', {}, alt)) : null,
-        h('p', { class: 'muted small' }, food.brand ? `${food.brand} · ` : '', food.qty ? `${food.qty} · ` : '', sourceBadge(food),
+        h('h2', { lang: isAr() && !food.ar ? 'fr' : null }, foodName(food)),
+        alt ? h('p', { class: 'muted small' }, h('bdi', { lang: altLang(food) }, alt)) : null,
+        h('p', { class: 'muted small' }, food.brand ? h('span', { lang: 'fr' }, `${food.brand} · `) : '', food.qty ? `${food.qty} · ` : '', sourceBadge(food),
           food.where ? ` · ${t(`where.${food.where}`)}` : ''))),
     h('p', { class: 'muted small' }, t('food.per100', { line: macroLine(food.n) })),
     note ? h('p', { class: 'tip small' }, note) : null,
@@ -14971,8 +15011,8 @@ function resultRow(food, onPick) {
     h('button', { class: 'result with-thumb', type: 'button', onclick: () => onPick(food) },
       foodThumb(food, { photos: photosOn(), userPhoto: F().myPhotos[food.id] }),
       h('span', { class: 'r-text' },
-        h('span', { class: 'r-name' }, foodName(food), food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null,
-          alt ? h('bdi', { class: 'r-ar' }, alt) : null),
+        h('span', { class: 'r-name' }, h('span', { lang: isAr() && !food.ar ? 'fr' : null }, foodName(food)), food.brand ? h('span', { class: 'muted', lang: 'fr' }, ` · ${food.brand}`) : null,
+          alt ? h('bdi', { class: 'r-ar', lang: altLang(food) }, alt) : null),
         h('span', { class: 'r-meta' }, sourceBadge(food), food.where ? ` ${t(`where.${food.where}`)} ·` : '', ` ${t('food.per100short', { kcal: fmt(food.n.kcal), p: fmt(food.n.p, 1) })}`))));
 }
 
@@ -15592,7 +15632,9 @@ function viewDiary() {
     iconButton('back', t('day.prev'), () => { foodDay = addDays(foodDay, -1); ctx.render(); }),
     h('div', { class: 'day-title' }, h('h1', {}, dayLabel(foodDay)),
       foodDay !== today ? h('button', { class: 'link small', onclick: () => { foodDay = today; ctx.render(); } }, t('day.backToToday')) : null),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('day.next'), disabled: foodDay >= today, onclick: () => { foodDay = addDays(foodDay, 1); ctx.render(); } }, icon('next')));
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('day.next'), disabled: foodDay >= today, onclick: () => { foodDay = addDays(foodDay, 1); ctx.render(); } }, icon('next')),
+      langToggle(ctx.render)));
 
   const tile = (label, subl, name, onclick, primary) => h('button', { class: `add-tile${primary ? ' primary' : ''}`, type: 'button', onclick },
     icon(name), h('span', { class: 'add-label' }, label), h('span', { class: 'add-sub' }, subl));
@@ -15725,7 +15767,7 @@ function viewFood(c) {
   const tabs = [['meals', t('food.tab.meals')], ['diary', t('food.tab.diary')], ['recipes', t('food.tab.recipes')], ['goal', t('food.tab.progress')]];
   const active = sub === 'recipe' ? 'recipes' : sub;
   const seg = h('div', { class: 'chips seg', role: 'tablist' }, ...tabs.map(([k, l]) => h('button', {
-    class: `chip${k === active ? ' on' : ''}`, role: 'tab', 'aria-selected': String(k === active), onclick: () => { sub = k; ctx.render(); },
+    class: `chip${k === active ? ' on' : ''}`, role: 'tab', 'aria-selected': String(k === active), onclick: () => { if (k === 'recipes') closeRecipe(); sub = k; ctx.render(); window.scrollTo(0, 0); },
   }, l)));
   let body;
   if (sub === 'meals') body = viewMeals(api());
@@ -15735,7 +15777,7 @@ function viewFood(c) {
   return h('section', { class: 'food' }, seg, ...body);
 }
 
-function resetFoodView() { foodDay = dayKey(); if (sub === 'recipe') sub = 'recipes'; }
+function resetFoodView() { foodDay = dayKey(); if (sub === 'recipe') sub = 'recipes'; closeRecipe(); }
 
 /** Settings card for meals and the meal plan. */
 function mealSettingsCard(c) { ctx = c; return mealSettings(api(), editProfile); }

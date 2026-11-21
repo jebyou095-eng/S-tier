@@ -44,13 +44,13 @@ const SP = process.argv[2];
   for (let i = 0; i < n; i++) {
     await page.click('.seg .chip >> text=Exercises'); await settle();
     if (await page.locator('text=Clear').count()) await page.click('text=Clear');
-    await page.locator('.ex-row').nth(i).click(); await page.waitForSelector('text=How to do it');
+    await page.locator('.ex-row').nth(i).click({ timeout: 5000 }).catch(async (e) => { await page.screenshot({ path: `${SP}/g-fail.png` }); console.log('fail at', i, await page.locator('.ex-row').count()); throw e; }); await page.waitForSelector('text=How to do it');
   }
   console.log('details rendered:', n);
   await page.click('.seg .chip >> text=Progress'); await settle();
   await page.screenshot({ path: `${SP}/g5-progress.png`, fullPage: true });
   // Moroccan food search
-  await page.click('.tab >> text=Food'); await settle();
+  await page.click('.tab >> text=Food'); await page.click('.seg .chip >> text=Diary'); await settle();
   await page.click('.seg .chip >> text=Diary'); await settle();
   await page.click('.add-tile:has-text("Search")');
   await page.fill('input[type=search]', 'harira');

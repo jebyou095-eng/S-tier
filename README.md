@@ -4,6 +4,19 @@ A private, offline analytics app for your phone. Track anything (mood, sleep, wa
 
 It also has a **gym section** (exercise library with muscle maps, animated form demos, a workout logger and a safety & evidence guide) and a **food scanner and calorie counter** with a **bulking / body-recomposition planner**: scan a barcode with your camera, check the calories and macros against more than one trusted source, and follow a meal plan sized to your body and goal.
 
+
+## What's new in v1.8
+
+- **New design**: dark, calm and sporty; Space Grotesk, Inter and IBM Plex Sans Arabic bundled (no Google Fonts).
+- **Arabic and English everywhere** (`js/lang-en.js`, `js/lang-ar.js`, `js/exercises-ar.js`): full right-to-left layout, Western digits, Darija food names. EN | ع switch on every main screen; follows the phone at first.
+- **Recipes** (`js/recipes.js`, `js/meals.js`): your dishes with ingredients in both languages, cooking steps, a servings stepper, swap items, your own recipes, favourites and "Don't suggest". Nutrition is calculated from the food database.
+- **Training-day meal plan** (`js/mealplan.js`): Push / Pull / Legs + Arms / Rest sizing, variety rules, a week view and weight-trend checks.
+- **Meals adapt to your training**: session energy (MET × kg × hours), extra carbs, protein, rest-day sizing and recovery mode, each with an Undo. Limits: ±400 kcal a day, protein ≥ 120 g, max 4 eggs.
+- **Photo editor** (`js/photoedit.js`, `js/imaging.js`, `js/cutout.js`): on-device background removal (U²-Net-p, Apache-2.0, `tools/convert_u2netp.py`) on the TensorFlow.js WebAssembly engine, plus Keep/Erase brushes, Enhance, sliders, backgrounds and crop. The original is kept, encrypted and included in backups.
+- Tests: `tests/v18/` (meal plan rules, every screen in both languages, photo editor) and the earlier suites in `tests/v17/`.
+
+Personal starter photos for the Android build are generated into `private/` (git-ignored) with `tools/make_starter_photos.js`.
+
 ## Privacy, by design
 
 - **Data never leaves your phone.** No accounts, cloud, server, or sync. Everything is stored in the browser's on-device storage (IndexedDB).

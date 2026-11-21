@@ -17,7 +17,7 @@ async function run(url, label, hosted) {
   await page.click('text=Add 2 trackers'); await settle();
   await page.click('.rate >> text=4'); await settle();
   // Food: scan
-  await page.click('.tab >> text=Food'); await settle();
+  await page.click('.tab >> text=Food'); await page.click('.seg .chip >> text=Diary'); await settle();
   await page.click('.add-tile:has-text("Barcode")');
   if (hosted) {
     await page.waitForSelector('text=Take photo');
@@ -52,7 +52,7 @@ async function run(url, label, hosted) {
   await page.screenshot({ path: `${SP}/${label}-settings.png` });
   await page.reload();
   await page.fill('input[aria-label="Passcode"]', 'atlas123'); await page.click('button:has-text("Unlock")');
-  await page.waitForSelector('.tab'); await page.click('.tab >> text=Food');
+  await page.waitForSelector('.tab'); await page.click('.tab >> text=Food'); await page.click('.seg .chip >> text=Diary');
   console.log(label, 'after reload+unlock diary:', (await page.locator('.meal .entry').allInnerTexts()).map(s => s.split('\n')[0]));
   console.log(label, 'errors:', errors, 'external:', [...new Set(ext)]);
   await browser.close();

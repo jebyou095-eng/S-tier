@@ -12,12 +12,12 @@ async function run(label, url, setup) {
   const t = {};
   let t0 = Date.now(); await p.goto(url); await p.waitForSelector('#tabs:not([hidden]), .card.empty, .chip'); t.firstRender = Date.now() - t0;
   // wait for food db warm (first launch downloads + parses)
-  t0 = Date.now(); await p.click('.tab >> text=Food'); await p.waitForFunction(() => document.querySelector('.add-tile'));
+  t0 = Date.now(); await p.click('.tab >> text=Food'); await p.click('.seg .chip >> text=Diary'); await p.waitForFunction(() => document.querySelector('.add-tile'));
   await p.click('.add-tile:has-text("Moroccan")'); await p.waitForSelector('.browse .result', { timeout: 60000 }); t.browseFirst = Date.now() - t0;
   await p.click('dialog >> text=Close');
   // second launch (from cache)
   t0 = Date.now(); await p.reload(); await p.waitForSelector('.tab'); t.reloadRender = Date.now() - t0;
-  t0 = Date.now(); await p.click('.tab >> text=Food'); await p.click('.add-tile:has-text("Moroccan")'); await p.waitForSelector('.browse .result'); t.browseCached = Date.now() - t0;
+  t0 = Date.now(); await p.click('.tab >> text=Food'); await p.click('.seg .chip >> text=Diary'); await p.click('.add-tile:has-text("Moroccan")'); await p.waitForSelector('.browse .result'); t.browseCached = Date.now() - t0;
   await p.click('dialog >> text=Close');
   // search latency per keystroke
   await p.click('.add-tile:has-text("Search")');

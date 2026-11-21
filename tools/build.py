@@ -13,6 +13,7 @@ Usage: python3 tools/build.py
 import base64
 import hashlib
 import re
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -108,7 +109,7 @@ def bundle_data(dest):
 
 def inline_fonts(css):
     """Bundle the fonts into the stylesheet (no Google Fonts, no network)."""
-    return re.sub(r'url\(fonts/([\w.-]+\.woff2)\)', lambda m: f"url({data_uri(ROOT / 'fonts' / m.group(1), 'font/woff2')})", css)
+    return re.sub(r'url\(\.\./fonts/([\w.-]+\.woff2)\)', lambda m: f"url({data_uri(ROOT / 'fonts' / m.group(1), 'font/woff2')})", css)
 
 
 def data_uri(path, mime):
@@ -133,12 +134,12 @@ def theme_css(css):
     return css.replace(m.group(0), replacement)
 
 
-def page(css, zxing, claude_sdk, tfjs, app, favicon, icon, body, connect, tfwasm='', wasm_b64=''):
+def page(css, zxing, claude_sdk, tfjs, app, favicon, icon, body, connect, tfwasm='', wasm_b64='', font_src='data:'):
     # 'wasm-unsafe-eval' lets the bundled WebAssembly engine (photo background removal) run;
     # it does not allow JavaScript eval. blob: is where that engine's binary is unpacked from.
     csp = ("default-src 'none'; "
            f"script-src {sha(zxing)} {sha(claude_sdk)} {sha(tfjs)} {sha(tfwasm)} {sha(app)} 'wasm-unsafe-eval'; style-src {sha(css)}; "
-           "font-src data:; img-src data: blob:; media-src blob: mediastream:; "
+           "font-src {font_src}; img-src data: blob:; media-src blob: mediastream:; "
            f"connect-src {connect} blob:; base-uri 'none'; form-action 'none'")
     return f'''<!doctype html>
 <html lang="en" dir="ltr">
@@ -191,8 +192,13 @@ def main():
     assets = ROOT / 'android' / 'app' / 'assets'
     assets.mkdir(parents=True, exist_ok=True)
     version = bundle_data(assets / 'data')
-    apk_page = page(css, zxing, claude_sdk, tfjs, bundle(hosted=False, local_data=version), favicon, icon, body,
-                    "'self' https://world.openfoodfacts.org https://api.nal.usda.gov https://api.anthropic.com", tfwasm, wasm_b64)
+    # Faster start in the APK: fonts and the WebAssembly engine are separate files read only when needed.
+    shutil.copytree(ROOT / 'fonts', assets / 'fonts', dirs_exist_ok=True)  # fonts + their OFL licences
+    (assets / 'js' / 'vendor').mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(JS / 'vendor' / 'tfjs-backend-wasm-simd.wasm', assets / 'js' / 'vendor' / 'tfjs-backend-wasm-simd.wasm')
+    apk_css = (ROOT / 'css' / 'styles.css').read_text().replace('url(../fonts/', 'url(fonts/')
+    apk_page = page(apk_css, zxing, claude_sdk, tfjs, bundle(hosted=False, local_data=version), favicon, icon, body,
+                    "'self' https://world.openfoodfacts.org https://api.nal.usda.gov https://api.anthropic.com", tfwasm, '', "'self'")
     (assets / 'index.html').write_text(apk_page)
     leaks = [str(f.relative_to(assets)) for f in assets.rglob('*') if f.is_file() and b'jebyou' in f.read_bytes()]
     if leaks:

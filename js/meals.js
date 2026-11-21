@@ -512,6 +512,9 @@ function viewRecipePage(api) {
   ];
 }
 
+/** Back to the recipe list (when the Recipes tab is tapped again). */
+export function closeRecipe() { openRecipe = null; }
+
 export function viewRecipes(api) {
   return openRecipe ? viewRecipePage(api) : viewLibrary(api);
 }

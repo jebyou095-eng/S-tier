@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -51,16 +50,11 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-                == Configuration.UI_MODE_NIGHT_YES;
-        // The page's light/dark theme follows this activity theme.
-        setTheme(dark ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
+        // v1.8 design is dark only: match the system bars to it (#0E1412 page, #111916 tab bar).
+        setTheme(android.R.style.Theme_Material_NoActionBar);
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(dark ? Color.rgb(20, 20, 20) : Color.rgb(246, 245, 242));
-        getWindow().setNavigationBarColor(dark ? Color.rgb(31, 31, 30) : Color.WHITE);
-        if (!dark) {
-            getWindow().getDecorView().setSystemUiVisibility(0x00002000 /* LIGHT_STATUS_BAR */);
-        }
+        getWindow().setStatusBarColor(Color.rgb(14, 20, 18));
+        getWindow().setNavigationBarColor(Color.rgb(17, 25, 22));
 
         web = new WebView(this);
         setContentView(web);
@@ -93,6 +87,9 @@ public class MainActivity extends Activity {
                             : path.endsWith(".webp") ? "image/webp"
                             : path.endsWith(".jpg") ? "image/jpeg"
                             : path.endsWith(".png") ? "image/png"
+                            : path.endsWith(".woff2") ? "font/woff2"
+                            : path.endsWith(".wasm") ? "application/wasm"
+                            : path.endsWith(".txt") ? "text/plain"
                             : "application/octet-stream";
                     return new WebResourceResponse(mime, "utf-8", 200, "OK", headers, in);
                 } catch (IOException e) {

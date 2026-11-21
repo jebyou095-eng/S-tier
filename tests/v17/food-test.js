@@ -26,7 +26,7 @@ const FDC = { foods: [{ fdcId: 2041155, description: 'NUTELLA HAZELNUT SPREAD', 
     return { t, plan: { kcal: Math.round(plan.n.kcal), p: Math.round(plan.n.p) }, vplan: { kcal: Math.round(vplan.n.kcal), p: Math.round(vplan.n.p) },
       ean: s.validBarcode('3017624010046'), bad: s.validBarcode('3017624010047'), upce: s.expandUpcE('04252614'), upceOk: s.validBarcode('04252614') };
   })));
-  await page.click('.tab >> text=Food');
+  await page.click('.tab >> text=Food'); await page.click('.seg .chip >> text=Diary');
   await page.screenshot({ path: `${SP}/f0.png` });
   await page.click('.seg .chip >> text=Progress'); await page.click('text=Update weight, goal or details');
   await page.click('text=lb / ft');

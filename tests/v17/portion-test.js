@@ -13,7 +13,7 @@ const fs = require('fs'); const path = require('path'); const ROOT = process.cwd
     r.fulfill({ body: fs.existsSync(f) ? fs.readFileSync(f) : '', status: fs.existsSync(f) ? 200 : 404, headers: { 'access-control-allow-origin': '*' } });
   });
   await p.goto('http://localhost:8765/'); await p.waitForSelector('.tab');
-  await p.click('.tab >> text=Food'); await p.waitForTimeout(1500);
+  await p.click('.tab >> text=Food'); await p.click('.seg .chip >> text=Diary'); await p.waitForTimeout(1500);
   await p.screenshot({ path: `${SP}/food-after.png` });
   const scan = async (file) => {
     await p.click('.add-tile:has-text("Scan food")');

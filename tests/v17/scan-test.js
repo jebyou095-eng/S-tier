@@ -19,7 +19,7 @@ const [SP, step] = process.argv.slice(2);
   await p.goto('http://localhost:8765/');
   if (step === 'unlock' || step === 'B') { await p.fill('input[aria-label="Passcode"]', 'atlas123'); await p.click('button:has-text("Unlock")'); }
   await p.waitForSelector('.tab');
-  await p.click('.tab >> text=Food'); await p.waitForTimeout(1500);
+  await p.click('.tab >> text=Food'); await p.click('.seg .chip >> text=Diary'); await p.waitForTimeout(1500);
   await p.click('.add-tile:has-text("Scan food")');
   await p.waitForSelector('button:has-text("Start scan"):not([disabled])', { timeout: 60000 });
   await p.click('text=Start scan');

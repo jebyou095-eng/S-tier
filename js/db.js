@@ -67,7 +67,12 @@ async function decryptObj(k, iv, ct) {
   return JSON.parse(dec.decode(pt));
 }
 
-const toB64 = (bytes) => btoa(String.fromCharCode(...bytes));
+// In chunks: a backup with photos is several MB, too big to pass as one argument list.
+function toB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 export function cryptoAvailable() {

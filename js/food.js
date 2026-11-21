@@ -14,7 +14,7 @@ import { recognizeFood, recognitionMode, preparePhoto, RecognitionError } from '
 import { prepareScanner, fingerprint, learn, match, confidence, plateCoverage, addSize, estimateGrams, medianOf } from './foodscan.js';
 import { freshMeals, normalizeMeals, setCustomRecipes } from './mealplan.js';
 import { RECIPES } from './recipes.js';
-import { viewMeals, viewRecipes, mealSettings, importStarters } from './meals.js';
+import { viewMeals, viewRecipes, mealSettings, importStarters, closeRecipe } from './meals.js';
 
 const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'];
 const LB = 0.45359237;
@@ -155,6 +155,20 @@ export function foodName(food) {
   return food.name;
 }
 /** Second line: the other language, or for packaged products in Arabic the category. */
+// Serving sizes: common ones translated; any other printed label becomes "1 serving (N g)" in Arabic
+const SERVING_AR = {
+  '1 bowl': 'زلافة', '1 can': 'حكة', '1 cup': 'كاس', '1 cup dry': 'كاس ناشف', '1 date': 'تمرة', '1 fillet': 'فيلي', '1 glass': 'كاس', '1 handful': 'قبضة',
+  '1 large egg': 'بيضة كبيرة', '1 large white': 'بياض بيضة كبيرة', '1 medium': 'وحدة متوسطة', '1 oz': 'أونصة', '1 piece': 'طرف', '1 plate': 'طبسيل', '1 portion': 'حصة',
+  '1 pot': 'بوط', '1 scoop': 'مغرفة', '1 slice': 'طرف', '1 steak': 'ستيك', '1 tbsp': 'معلقة كبيرة', '1 thigh': 'فخذ', '1 tortilla': 'تورتيا', '2 squares': 'جوج مربعات',
+  '2 tbsp': 'جوج معالق كبار', '4 skewers': '4 قضبان', '8 olives': '8 زيتونات', 'small box': 'علبة صغيرة', '¼ cup': 'ربع كاس', '¼ loaf': 'ربع خبزة', '½ avocado': 'نص لافوكا',
+  '½ block': 'نص قالب', '½ cup': 'نص كاس', '1 egg': 'بيضة', '1 clove': 'فص', '1 fruit': 'حبة', '1 lemon': 'حامضة', '1 bun': 'خبيزة', '1 sandwich': 'صندويتش', '1 cookie': 'بيسكويتة',
+};
+function servingText(food) {
+  const l = food.servingLabel || '';
+  if (!isAr() || /^[\d.,]+ ?(g|ml)$/i.test(l)) return l.replace(/\bg\b/, t('unit.g')).replace(/\bml\b/, t('unit.ml'));
+  return SERVING_AR[l] || t('food.servingN', { g: fmt(food.serving) });
+}
+
 const altLang = (food) => (isAr() ? (food.ar ? 'en' : 'ar') : 'ar');
 function foodAlt(food) {
   if (isAr()) return food.ar ? food.name : food.cat ? catName(food.cat) : '';
@@ -301,9 +315,9 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
     };
     grams.addEventListener('input', update);
     const quick = [
-      [food.servingLabel !== '100 g' ? food.servingLabel : null, food.serving],
+      [food.servingLabel !== '100 g' ? servingText(food) : null, food.serving],
       [t('food.halfServing'), food.serving / 2], [t('food.twoServings'), food.serving * 2], [t('food.g100'), 100],
-    ].filter(([l]) => l).map(([l, g]) => h('button', { type: 'button', class: 'chip', onclick: () => { grams.value = String(Math.round(g * 10) / 10); update(); } }, l === food.servingLabel && !/\bg\b/.test(l) ? `${l} (${fmt(g)} ${t('unit.g')})` : l));
+    ].filter(([l]) => l).map(([l, g], i) => h('button', { type: 'button', class: 'chip', onclick: () => { grams.value = String(Math.round(g * 10) / 10); update(); } }, i === 0 && !/\d+ ?(g|غ)\b/.test(l) && !/\(/.test(l) ? `${l} (${fmt(g)} ${t('unit.g')})` : l));
     update();
     const thumb = foodThumb(food, { size: 'lg', photos: photosOn(), userPhoto: F().myPhotos[food.id] });
     const alt = foodAlt(food);
@@ -323,9 +337,9 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
       h('div', { class: 'thumb-col' }, thumb,
         h('button', { type: 'button', class: 'link small row', onclick: () => addMyPhoto(food, thumb) }, icon('camera', 'icon-sm'), F().myPhotos[food.id] ? t('photo.change') : t('photo.add'))),
       h('div', { class: 'grow-wrap' },
-        h('h2', {}, foodName(food)),
+        h('h2', { lang: isAr() && !food.ar ? 'fr' : null }, foodName(food)),
         alt ? h('p', { class: 'muted small' }, h('bdi', { lang: altLang(food) }, alt)) : null,
-        h('p', { class: 'muted small' }, food.brand ? `${food.brand} · ` : '', food.qty ? `${food.qty} · ` : '', sourceBadge(food),
+        h('p', { class: 'muted small' }, food.brand ? h('span', { lang: 'fr' }, `${food.brand} · `) : '', food.qty ? `${food.qty} · ` : '', sourceBadge(food),
           food.where ? ` · ${t(`where.${food.where}`)}` : ''))),
     h('p', { class: 'muted small' }, t('food.per100', { line: macroLine(food.n) })),
     note ? h('p', { class: 'tip small' }, note) : null,
@@ -412,7 +426,7 @@ function resultRow(food, onPick) {
     h('button', { class: 'result with-thumb', type: 'button', onclick: () => onPick(food) },
       foodThumb(food, { photos: photosOn(), userPhoto: F().myPhotos[food.id] }),
       h('span', { class: 'r-text' },
-        h('span', { class: 'r-name' }, foodName(food), food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null,
+        h('span', { class: 'r-name' }, h('span', { lang: isAr() && !food.ar ? 'fr' : null }, foodName(food)), food.brand ? h('span', { class: 'muted', lang: 'fr' }, ` · ${food.brand}`) : null,
           alt ? h('bdi', { class: 'r-ar', lang: altLang(food) }, alt) : null),
         h('span', { class: 'r-meta' }, sourceBadge(food), food.where ? ` ${t(`where.${food.where}`)} ·` : '', ` ${t('food.per100short', { kcal: fmt(food.n.kcal), p: fmt(food.n.p, 1) })}`))));
 }
@@ -1033,7 +1047,9 @@ function viewDiary() {
     iconButton('back', t('day.prev'), () => { foodDay = addDays(foodDay, -1); ctx.render(); }),
     h('div', { class: 'day-title' }, h('h1', {}, dayLabel(foodDay)),
       foodDay !== today ? h('button', { class: 'link small', onclick: () => { foodDay = today; ctx.render(); } }, t('day.backToToday')) : null),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('day.next'), disabled: foodDay >= today, onclick: () => { foodDay = addDays(foodDay, 1); ctx.render(); } }, icon('next')));
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('day.next'), disabled: foodDay >= today, onclick: () => { foodDay = addDays(foodDay, 1); ctx.render(); } }, icon('next')),
+      langToggle(ctx.render)));
 
   const tile = (label, subl, name, onclick, primary) => h('button', { class: `add-tile${primary ? ' primary' : ''}`, type: 'button', onclick },
     icon(name), h('span', { class: 'add-label' }, label), h('span', { class: 'add-sub' }, subl));
@@ -1166,7 +1182,7 @@ export function viewFood(c) {
   const tabs = [['meals', t('food.tab.meals')], ['diary', t('food.tab.diary')], ['recipes', t('food.tab.recipes')], ['goal', t('food.tab.progress')]];
   const active = sub === 'recipe' ? 'recipes' : sub;
   const seg = h('div', { class: 'chips seg', role: 'tablist' }, ...tabs.map(([k, l]) => h('button', {
-    class: `chip${k === active ? ' on' : ''}`, role: 'tab', 'aria-selected': String(k === active), onclick: () => { sub = k; ctx.render(); },
+    class: `chip${k === active ? ' on' : ''}`, role: 'tab', 'aria-selected': String(k === active), onclick: () => { if (k === 'recipes') closeRecipe(); sub = k; ctx.render(); window.scrollTo(0, 0); },
   }, l)));
   let body;
   if (sub === 'meals') body = viewMeals(api());
@@ -1176,7 +1192,7 @@ export function viewFood(c) {
   return h('section', { class: 'food' }, seg, ...body);
 }
 
-export function resetFoodView() { foodDay = dayKey(); if (sub === 'recipe') sub = 'recipes'; }
+export function resetFoodView() { foodDay = dayKey(); if (sub === 'recipe') sub = 'recipes'; closeRecipe(); }
 
 /** Settings card for meals and the meal plan. */
 export function mealSettingsCard(c) { ctx = c; return mealSettings(api(), editProfile); }

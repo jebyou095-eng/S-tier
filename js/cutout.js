@@ -30,7 +30,7 @@ async function loadWasmBackend(tf) {
   }
   const bundled = document.getElementById('lib-tfwasm-bin');
   let url = 'js/vendor/tfjs-backend-wasm-simd.wasm';
-  if (bundled) {
+  if (bundled && bundled.textContent.trim()) {
     const bytes = Uint8Array.from(atob(bundled.textContent.trim()), (c) => c.charCodeAt(0));
     url = URL.createObjectURL(new Blob([bytes], { type: 'application/wasm' }));
     bundled.remove();

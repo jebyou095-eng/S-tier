@@ -20,7 +20,7 @@ const fs = require('fs'); const path = require('path'); const ROOT = process.cwd
   const migrated = await p.evaluate(async () => { const v = await import('./js/db.js'); return Object.keys(await v.loadPhotos()); });
   console.log('legacy photo moved to own record:', migrated);
   // Add a photo through the UI to harira
-  await p.click('.tab >> text=Food'); await p.waitForTimeout(800);
+  await p.click('.tab >> text=Food'); await p.click('.seg .chip >> text=Diary'); await p.waitForTimeout(800);
   await p.click('.add-tile:has-text("Search")'); await p.fill('input[type=search]', 'harira'); await p.waitForTimeout(300); await p.click('.result >> nth=0');
   const chooser = p.waitForEvent('filechooser'); await p.click('text=Add photo'); await (await chooser).setFiles(`${SP}/plate.jpg`);
   await p.waitForSelector('text=Photo saved on your phone'); await p.click('dialog >> text=Cancel');
@@ -34,7 +34,7 @@ const fs = require('fs'); const path = require('path'); const ROOT = process.cwd
   const dl = p.waitForEvent('download'); await p.click('text=Export encrypted backup'); const file = await (await dl).path();
   const backup = JSON.parse(fs.readFileSync(file, 'utf8'));
   await p.reload(); await p.fill('input[aria-label="Passcode"]', 'atlas123'); await p.click('button:has-text("Unlock")'); await p.waitForSelector('.tab');
-  await p.click('.tab >> text=Food'); await p.waitForTimeout(800);
+  await p.click('.tab >> text=Food'); await p.click('.seg .chip >> text=Diary'); await p.waitForTimeout(800);
   await p.click('.add-tile:has-text("Search")'); await p.fill('input[type=search]', 'harira'); await p.waitForTimeout(300);
   console.log('photo shown after unlock:', await p.locator('.result').first().locator('.thumb.has-photo').count() === 1);
   const inBackup = await p.evaluate(async (bk) => { const v = await import('./js/db.js'); const d = await v.readBackup(bk, 'atlas123'); return Object.keys(d.food.myPhotos || {}); }, backup);

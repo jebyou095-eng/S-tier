@@ -196,7 +196,7 @@ export function scanBarcode() {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        });
+        }).catch(() => navigator.mediaDevices.getUserMedia({ audio: false, video: true })); // retry with the simplest request
       } catch (err) {
         console.warn('camera:', err?.name, err?.message);
         status.textContent = t('bc.denied');

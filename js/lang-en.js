@@ -1045,4 +1045,6 @@ export const EN = {
   "refs.intro": "Tap to look up the paper on PubMed (US National Library of Medicine). This opens your browser and is the only time the Gym section uses the internet.",
   // ---- extra ----
   "meals.guess": "{type}?",
+  // ---- extra2 ----
+  "food.servingN": "1 serving ({g} g)",
 };
