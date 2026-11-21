@@ -1,5 +1,7 @@
-// Food tab: calorie & macro diary, barcode scanner, food search, bulking planner.
-import { h, uid, dayLabel, toast, modal, confirmDialog } from './ui.js';
+// Food tab: today's meals, calorie & macro diary, recipes, barcode scanner, food search.
+import { h, uid, dayLabel, toast, modal, confirmDialog, langToggle, iconButton } from './ui.js';
+import { t, tn, fmt, isAr, dateText } from './i18n.js';
+import { icon } from './icons.js';
 import { dayKey, addDays, dayRange, series } from './stats.js';
 import { barChart } from './charts.js';
 import { searchLocal } from './foods.js';
@@ -10,25 +12,34 @@ import { scanBarcode, canonicalBarcode } from './scanner.js';
 import { loadFoodDb, foodDb, foodDbMeta, findByCode, onFoodDb, foodThumb, photosAvailable, ingredientInfo, labelIngredients, LOCAL as DATA_BUILT_IN } from './fooddb.js';
 import { recognizeFood, recognitionMode, preparePhoto, RecognitionError } from './recognize.js';
 import { prepareScanner, fingerprint, learn, match, confidence, plateCoverage, addSize, estimateGrams, medianOf } from './foodscan.js';
+import { freshMeals, normalizeMeals, setCustomRecipes } from './mealplan.js';
+import { RECIPES } from './recipes.js';
+import { viewMeals, viewRecipes, mealSettings, importStarters } from './meals.js';
 
-const MEALS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' };
-const k0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
-const k1 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'];
 const LB = 0.45359237;
 
-let sub = 'diary';
+let sub = 'meals';
 let foodDay = dayKey();
-let ctx; // { state, commit, render, addTrackerObj }
+let ctx; // { state, commit, render, save, savePhoto, … }
 
 const F = () => ctx.state.food;
+const k0 = { format: (x) => fmt(x) };
+const k1 = { format: (x) => fmt(x, 1) };
 
 // ---------- data ----------
+export const DEFAULT_PROFILE = { sex: 'male', age: 22, heightCm: 183, weightKg: 63, activity: 1.55, goal: 'lean', units: 'metric', diet: 'omnivore' };
+
 export function freshFood() {
-  return { profile: null, log: [], saved: [], online: false, usdaKey: '', moroccoDb: true, photos: true, myPhotos: {}, scans: {}, ai: false, aiKey: '' };
+  return {
+    profile: { ...DEFAULT_PROFILE }, log: [], saved: [], online: false, usdaKey: '', moroccoDb: true, photos: true, myPhotos: {}, scans: {}, ai: false, aiKey: '',
+    meals: freshMeals(), recipePhotos: {}, myRecipes: [], avoid: ['zucchini'],
+  };
 }
 
 const num = (x, lo, hi) => (Number.isFinite(+x) && +x >= lo && +x <= hi ? +x : null);
 const str = (x, max) => String(x ?? '').slice(0, max);
+const isImg = (v, max = 4e6) => typeof v === 'string' && /^data:image\/(jpeg|webp|png);base64,/.test(v) && v.length < max;
 
 function cleanN(n) {
   if (!n) return null;
@@ -40,27 +51,47 @@ function cleanFood(x) {
   const n = cleanN(x?.n);
   if (!n || !x.name) return null;
   return {
-    id: str(x.id || uid(), 60), name: str(x.name, 80), brand: str(x.brand, 40), source: str(x.source, 30) || 'You',
+    id: str(x.id || uid(), 60), name: str(x.name, 80), ar: str(x.ar, 80), brand: str(x.brand, 40), source: str(x.source, 30) || 'You',
     code: str(x.code, 14).replace(/\D/g, ''), n, serving: num(x.serving, 1, 5000) ?? 100, servingLabel: str(x.servingLabel, 30) || '100 g',
-    img: /^img\/[\w/-]+\.(jpg|webp)$/.test(x.img || '') ? x.img : '', emoji: str(x.emoji, 4),
+    img: /^img\/[\w/-]+\.(jpg|webp)$/.test(x.img || '') ? x.img : '', cat: str(x.cat, 40),
   };
+}
+
+/** Your own recipes: same shape as the built-in ones, checked field by field. */
+function cleanRecipe(r) {
+  if (!r || typeof r !== 'object' || !/^my:[\w-]{1,40}$/.test(r.id || '') || !['breakfast', 'shake', 'lunch', 'snack', 'pregym', 'dinner', 'drink'].includes(r.slot)) return null;
+  const ing = (Array.isArray(r.ing) ? r.ing : []).slice(0, 40).map((x) => (Array.isArray(x) && typeof x[0] === 'string' && num(x[1], 0.1, 5000)
+    ? [x[0].slice(0, 40), +x[1], { en: str(x[2]?.en, 60), ar: str(x[2]?.ar, 60), u: x[2]?.u === 'ml' ? 'ml' : undefined, n: num(x[2]?.n, 0.5, 50) ?? undefined }] : null)).filter(Boolean);
+  if (!ing.length) return null;
+  const steps = (lst) => (Array.isArray(lst) ? lst : []).slice(0, 20).map((s) => str(s, 400)).filter(Boolean);
+  return {
+    id: r.id, slot: r.slot, name: str(r.name, 80) || str(r.ar, 80), ar: str(r.ar, 80), min: num(r.min, 1, 600) ?? 20, tags: [], batch: r.batch === true,
+    eggs: ing.filter(([id]) => id === 'egg').reduce((n, [, g]) => n + g / 50, 0), serves: num(r.serves, 1, 20) ?? 1, ing,
+    steps: { en: steps(r.steps?.en), ar: steps(r.steps?.ar) }, mine: true,
+  };
+}
+
+/** A valid profile, or null. */
+function cleanProfile(p) {
+  if (!p || !GOALS[p.goal] || !ACTIVITY[p.activity]) return null;
+  const prof = {
+    sex: p.sex === 'female' ? 'female' : 'male', age: num(p.age, 13, 110), heightCm: num(p.heightCm, 100, 250), weightKg: num(p.weightKg, 30, 350),
+    activity: +p.activity, goal: p.goal, units: p.units === 'imperial' ? 'imperial' : 'metric', diet: p.diet === 'vegetarian' ? 'vegetarian' : 'omnivore',
+  };
+  return prof.age && prof.heightCm && prof.weightKg ? prof : null;
 }
 
 export function normalizeFood(raw) {
   const out = freshFood();
   if (!raw || typeof raw !== 'object') return out;
-  const p = raw.profile;
-  if (p && GOALS[p.goal] && ACTIVITY[p.activity]) {
-    const prof = {
-      sex: p.sex === 'female' ? 'female' : 'male', age: num(p.age, 13, 110), heightCm: num(p.heightCm, 100, 250), weightKg: num(p.weightKg, 30, 350),
-      activity: +p.activity, goal: p.goal, units: p.units === 'imperial' ? 'imperial' : 'metric', diet: p.diet === 'vegetarian' ? 'vegetarian' : 'omnivore',
-    };
-    if (prof.age && prof.heightCm && prof.weightKg) out.profile = prof;
-  }
+  out.profile = cleanProfile(raw.profile) || out.profile;
   for (const e of Array.isArray(raw.log) ? raw.log : []) {
     const food = cleanFood(e);
     if (!food || !/^\d{4}-\d{2}-\d{2}$/.test(e.day) || !num(e.grams, 0.1, 10000)) continue;
-    out.log.push({ ...food, id: str(e.id || uid(), 40), day: e.day, ts: Number.isFinite(+e.ts) ? +e.ts : Date.now(), grams: +e.grams, meal: MEALS[e.meal] ? e.meal : 'snack' });
+    out.log.push({
+      ...food, id: str(e.id || uid(), 40), day: e.day, ts: Number.isFinite(+e.ts) ? +e.ts : Date.now(), grams: +e.grams, meal: MEALS.includes(e.meal) ? e.meal : 'snack',
+      recipe: typeof e.recipe === 'string' ? e.recipe.slice(0, 60) : undefined, slot: typeof e.slot === 'string' ? e.slot.slice(0, 20) : undefined,
+    });
   }
   for (const s of Array.isArray(raw.saved) ? raw.saved : []) {
     const food = cleanFood(s);
@@ -75,22 +106,60 @@ export function normalizeFood(raw) {
   if (raw.scans && typeof raw.scans === 'object') {
     for (const [k, r] of Object.entries(raw.scans).slice(0, 500)) {
       const food = cleanFood(r?.food);
-      const prints = (Array.isArray(r?.prints) ? r.prints : []).filter((p) => Number.isFinite(+p?.s) && typeof p?.q === 'string' && p.q.length <= 2400).slice(-40);
+      const prints = (Array.isArray(r?.prints) ? r.prints : []).filter((x) => Number.isFinite(+x?.s) && typeof x?.q === 'string' && x.q.length <= 2400).slice(-40);
       const sizes = (Array.isArray(r?.sizes) ? r.sizes : []).filter((x) => num(x?.c, 0.01, 1) && num(x?.g, 1, 5000)).slice(-12).map((x) => ({ c: +x.c, g: +x.g }));
       if (food && prints.length) out.scans[String(k).slice(0, 60)] = { food, prints, sizes, lastGrams: num(r.lastGrams, 1, 5000), updated: Number.isFinite(+r.updated) ? +r.updated : 0 };
     }
   }
   if (raw.myPhotos && typeof raw.myPhotos === 'object') {
-    for (const [k, v] of Object.entries(raw.myPhotos).slice(0, 300)) {
-      if (typeof v === 'string' && v.startsWith('data:image/jpeg;base64,') && v.length < 200000) out.myPhotos[String(k).slice(0, 60)] = v;
+    for (const [k, v] of Object.entries(raw.myPhotos).slice(0, 300)) if (isImg(v, 400000)) out.myPhotos[String(k).slice(0, 60)] = v;
+  }
+  out.myRecipes = (Array.isArray(raw.myRecipes) ? raw.myRecipes : []).map(cleanRecipe).filter(Boolean).slice(0, 200);
+  setCustomRecipes(out.myRecipes);
+  const ids = new Set([...RECIPES.map((r) => r.id), ...out.myRecipes.map((r) => r.id)]);
+  out.meals = normalizeMeals(raw.meals, ids);
+  if (raw.recipePhotos && typeof raw.recipePhotos === 'object') {
+    for (const [k, v] of Object.entries(raw.recipePhotos).slice(0, 300)) {
+      if (!v || !isImg(v.edited) || !isImg(v.thumb, 300000)) continue;
+      out.recipePhotos[String(k).slice(0, 60)] = {
+        edited: v.edited, thumb: v.thumb, orig: isImg(v.orig, 8e6) ? v.orig : '', mask: isImg(v.mask) ? v.mask : '',
+        edit: v.edit && typeof v.edit === 'object' ? JSON.parse(JSON.stringify(v.edit)) : null, made: v.made !== false, starter: v.starter === true, ts: +v.ts || 0,
+      };
     }
   }
+  out.avoid = Array.isArray(raw.avoid) ? raw.avoid.filter((x) => typeof x === 'string').slice(0, 30) : out.avoid;
   out.usdaKey = /^[A-Za-z0-9]{0,64}$/.test(raw.usdaKey || '') ? raw.usdaKey || '' : '';
   return out;
 }
 
 const dayLog = (day) => F().log.filter((e) => e.day === day);
 const totals = (list) => sum(list.map((e) => scale(e.n, e.grams)));
+
+// ---------- names ----------
+const CAT_KEYS = {
+  'Other groceries': 'groceries', 'Chocolate & sweets': 'sweets', Dairy: 'dairy', 'Biscuits & cakes': 'biscuits', Drinks: 'drinks', 'Bread & cereals': 'bread-cereals',
+  'Canned & ready meals': 'canned', 'Chips & snacks': 'chips', 'Oils & fats': 'oils', 'Meat & fish': 'meat-fish', Water: 'water', 'Fruit & vegetables': 'fruit-veg',
+  Vegetables: 'vegetables', Fruit: 'fruit', Dishes: 'dishes', 'Meat, fish & eggs': 'meat-fish-eggs', 'Sweets & pastries': 'pastries', Bread: 'bread', Sandwiches: 'sandwiches',
+  'Nuts & seeds': 'nuts', 'Legumes & grains': 'legumes', 'Olives & oils': 'olives', Soups: 'soups', 'Street snacks': 'street-snacks', Grills: 'grills', Salads: 'salads', Sweet: 'sweet',
+};
+export const catName = (c) => (CAT_KEYS[c] ? t(`cat.${CAT_KEYS[c]}`) : c);
+
+/** A food's name in your language. Packaged products keep the name printed on the pack. */
+export function foodName(food) {
+  if (!food) return '';
+  // (packaged products keep their printed name; see nameLang)
+  if (isAr()) {
+    if (food.ar) return food.ar;
+    if (food.recipeName) return food.recipeName.ar || food.name;
+  }
+  return food.name;
+}
+/** Second line: the other language, or for packaged products in Arabic the category. */
+const altLang = (food) => (isAr() ? (food.ar ? 'en' : 'ar') : 'ar');
+function foodAlt(food) {
+  if (isAr()) return food.ar ? food.name : food.cat ? catName(food.cat) : '';
+  return food.ar || '';
+}
 
 function remember(food) {
   if (food.id && !food.id.includes(':')) return; // built-in table, no need to save
@@ -103,12 +172,14 @@ function remember(food) {
   saved.length = Math.min(saved.length, 300);
 }
 
-async function addEntry(food, grams, meal) {
-  remember(food);
+async function addEntry(food, grams, meal, extra = {}) {
+  if (!food.recipe) remember(food);
   const ts = foodDay === dayKey() ? Date.now() : new Date(`${foodDay}T12:00`).getTime();
-  F().log.push({ ...cleanFood(food), id: uid(), day: foodDay, ts, grams, meal });
+  const entry = { ...cleanFood(food), id: uid(), day: extra.day || foodDay, ts, grams, meal, ...extra };
+  F().log.push(entry);
   await ctx.commit();
-  toast(`Added ${food.name} · ${k0.format(scale(food.n, grams).kcal)} kcal`);
+  toast(t('food.added', { name: foodName(food), kcal: fmt(scale(food.n, grams).kcal) }));
+  return entry;
 }
 
 function defaultMeal() {
@@ -119,36 +190,37 @@ function defaultMeal() {
 // ---------- privacy consent ----------
 async function ensureOnline() {
   if (globalThis.POCKET_STATS_HOSTED) {
-    toast('Online lookups only work in the downloaded app. Built-in foods and label entry work here.');
+    toast(t('online.hosted'));
     return false;
   }
   if (F().online) return true;
   const ok = await modal((done) => h('div', { class: 'sheet-body' },
-    h('h2', {}, 'Look up foods online?'),
-    h('p', {}, 'To find a product, the app asks two public food databases:'),
+    h('h2', {}, t('online.q')),
+    h('p', {}, t('online.intro')),
     h('ul', { class: 'bullets' },
-      h('li', {}, h('b', {}, 'USDA FoodData Central'), ' (US government)'),
-      h('li', {}, h('b', {}, 'Open Food Facts'), ' (non-profit, packaged products worldwide)')),
-    h('p', {}, 'Only the barcode number or the words you type are sent. No account, no cookies, no device ID, and nothing from your diary, body stats or other data.'),
-    h('p', { class: 'muted small' }, 'Products you add are saved on your phone, so scanning them again works offline. You can turn this off any time in Settings.'),
+      h('li', {}, h('b', {}, 'USDA FoodData Central'), ` (${t('online.usda')})`),
+      h('li', {}, h('b', {}, 'Open Food Facts'), ` (${t('online.off')})`)),
+    h('p', {}, t('online.sent')),
+    h('p', { class: 'muted small' }, t('online.saved')),
     h('div', { class: 'row end' },
-      h('button', { class: 'btn ghost', onclick: () => done(false) }, 'Not now'),
-      h('button', { class: 'btn primary', onclick: () => done(true) }, 'Allow lookups'))));
+      h('button', { class: 'btn ghost', onclick: () => done(false) }, t('notNow')),
+      h('button', { class: 'btn primary', onclick: () => done(true) }, t('online.allow')))));
   if (ok) { F().online = true; await ctx.commit(); }
   return ok;
 }
 
 // ---------- dialogs ----------
+const SOURCE_KEYS = { 'Open Food Facts': 'off', USDA: 'usda', Estimate: 'est', Recipe: 'rec', 'Photo estimate': 'ai', You: 'you', 'My recipe': 'rec' };
 function sourceBadge(food) {
-  const cls = { 'Open Food Facts': 'off', USDA: 'usda', Estimate: 'est', Recipe: 'rec', 'Photo estimate': 'ai' }[food.source] || 'you';
-  return h('span', { class: `src src-${cls}`, title: { Estimate: 'Typical home recipe. Values vary; weigh and adjust.', Recipe: 'Calculated from a typical recipe using USDA ingredient values.', 'Photo estimate': "Claude's estimate from your photo." }[food.source] || null }, food.source === 'Estimate' ? 'Estimate' : food.source);
+  const cls = SOURCE_KEYS[food.source] || 'you';
+  return h('span', { class: `src src-${cls}`, title: ['est', 'rec', 'ai'].includes(cls) ? t(`src.${cls}.tip`) : null }, t(`src.${cls}`));
 }
 
 function macroLine(n) {
-  return `${k0.format(n.kcal)} kcal · P ${k1.format(n.p)} g · C ${k1.format(n.c)} g · F ${k1.format(n.f)} g`;
+  return t('food.macroLine', { kcal: fmt(n.kcal), p: fmt(n.p, 1), c: fmt(n.c, 1), f: fmt(n.f, 1) });
 }
 
-const MULTS = [[0, 'None'], [0.5, '½'], [1, 'Normal'], [2, '2×']];
+const MULTS = [[0, 'mult.none'], [0.5, 'mult.half'], [1, 'mult.normal'], [2, 'mult.double']];
 
 /** Nutrition per 100 g of a recipe dish with some ingredients removed or changed. */
 function recipeN(food, mult) {
@@ -162,17 +234,15 @@ function recipeN(food, mult) {
   return out;
 }
 
+const ingName = (id) => { const i = ingredientInfo(id); return i ? (isAr() && i.ar ? i.ar : i.name.split(' (')[0]) : id; };
+
 function modsLabel(food, mult) {
-  const parts = Object.entries(mult).filter(([, m]) => m !== 1).map(([id, m]) => {
-    const nm = (ingredientInfo(id)?.name || id).split(' (')[0].toLowerCase();
-    return m === 0 ? `no ${nm}` : m === 0.5 ? `½ ${nm}` : `2× ${nm}`;
-  });
-  return parts.join(', ');
+  return Object.entries(mult).filter(([, m]) => m !== 1).map(([id, m]) => t(m === 0 ? 'mods.no' : m === 0.5 ? 'mods.half' : 'mods.double', { name: ingName(id) })).join(isAr() ? '، ' : ', ');
 }
 
 /** Add or replace your own photo of a food. Stored privately (encrypted with your passcode). */
 async function addMyPhoto(food, box) {
-  const input = h('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+  const input = h('input', { type: 'file', accept: 'image/*' });
   input.addEventListener('change', async () => {
     const file = input.files[0];
     if (!file) return;
@@ -181,20 +251,22 @@ async function addMyPhoto(food, box) {
       F().myPhotos[food.id] = dataUrl;
       await ctx.savePhoto(food.id, dataUrl);
       box.replaceWith(foodThumb(food, { size: 'lg', userPhoto: dataUrl }));
-      toast('Photo saved on your phone');
+      toast(t('photo.saved'));
     } catch {
-      toast("Couldn't read that photo.");
+      toast(t('photo.unreadable'));
     }
   });
   input.click();
 }
 
+const mealSelect = (m0) => h('select', { 'aria-label': t('food.meal') }, ...MEALS.map((k) => h('option', { value: k, selected: k === (m0 || defaultMeal()) }, t(`meal.${k}`))));
+
 function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note } = {}) {
   return modal((done) => {
     const mult = {};
     const hasRecipe = Array.isArray(food.ing) && food.ing.length && food.ing.every(([id]) => ingredientInfo(id));
-    const grams = h('input', { type: 'text', inputmode: 'decimal', value: String(g0 ?? food.serving), 'aria-label': 'Amount in grams', autofocus: true });
-    const meal = h('select', { 'aria-label': 'Meal' }, ...Object.entries(MEALS).map(([k, v]) => h('option', { value: k, selected: k === (m0 || defaultMeal()) }, v)));
+    const grams = h('input', { type: 'text', inputmode: 'decimal', value: String(g0 ?? food.serving), 'aria-label': t('food.gramsAmount'), autofocus: true });
+    const meal = mealSelect(m0);
     const preview = h('div', { class: 'preview' });
     const ingList = h('ul', { class: 'ing-list' });
     const val = () => parseFloat(grams.value.replace(',', '.'));
@@ -202,37 +274,39 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
     const currentN = () => (changed() ? recipeN(food, mult) : food.n);
     const update = () => {
       const g = val();
-      if (!(g > 0)) { preview.replaceChildren(h('span', { class: 'muted' }, 'Enter an amount')); return; }
+      if (!(g > 0)) { preview.replaceChildren(h('span', { class: 'muted' }, t('food.enterAmount'))); return; }
       const n = scale(currentN(), g);
       const base = scale(food.n, g);
       const diff = changed() ? Math.round(n.kcal - base.kcal) : 0;
       preview.replaceChildren(
-        h('div', { class: 'big' }, `${k0.format(n.kcal)} kcal`,
-          diff ? h('span', { class: `delta ${diff < 0 ? 'ok' : 'warn'}` }, ` ${diff > 0 ? '+' : '−'}${k0.format(Math.abs(diff))} vs usual recipe`) : null),
+        h('div', { class: 'big' }, t('food.kcalN', { n: fmt(n.kcal) }),
+          diff ? h('span', { class: `delta ${diff < 0 ? 'ok' : 'warn'}` }, ` ${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} ${t('food.vsUsual')}`) : null),
         h('div', { class: 'macros' },
-          h('span', { class: 'm-p' }, `P ${k1.format(n.p)} g`), h('span', { class: 'm-c' }, `C ${k1.format(n.c)} g`), h('span', { class: 'm-f' }, `F ${k1.format(n.f)} g`)));
+          h('span', { class: 'm-p' }, t('food.pG', { n: fmt(n.p, 1) })), h('span', { class: 'm-c' }, t('food.cG', { n: fmt(n.c, 1) })), h('span', { class: 'm-f' }, t('food.fG', { n: fmt(n.f, 1) }))));
       if (hasRecipe) {
         ingList.replaceChildren(...food.ing.map(([id, per100]) => {
           const info = ingredientInfo(id);
           const m = mult[id] ?? 1;
           const ig = (per100 * g) / 100;
           const kcal = (info.n.kcal * ig * m) / 100;
+          const nm = isAr() && info.ar ? info.ar : info.name;
           return h('li', { class: m === 0 ? 'removed' : '' },
-            h('span', { class: 'ing-name' }, info.name, h('span', { class: 'muted small block' }, `${k0.format(ig * m)} g · ${k0.format(kcal)} kcal`)),
-            h('span', { class: 'ing-mult', role: 'group', 'aria-label': `${info.name} amount` }, ...MULTS.map(([v, l]) => h('button', {
+            h('span', { class: 'ing-name' }, nm, h('span', { class: 'muted small block' }, t('food.gKcal', { g: fmt(ig * m), kcal: fmt(kcal) }))),
+            h('span', { class: 'ing-mult', role: 'group', 'aria-label': t('food.amountOf', { name: nm }) }, ...MULTS.map(([v, l]) => h('button', {
               type: 'button', class: `mult${m === v ? ' on' : ''}`, 'aria-pressed': String(m === v),
               onclick: () => { if (v === 1) delete mult[id]; else mult[id] = v; update(); },
-            }, l))));
+            }, t(l)))));
         }));
       }
     };
     grams.addEventListener('input', update);
     const quick = [
-      [food.servingLabel !== '100 g' ? `${food.servingLabel}` : null, food.serving],
-      ['½ serving', food.serving / 2], ['2 servings', food.serving * 2], ['100 g', 100],
-    ].filter(([l]) => l).map(([l, g]) => h('button', { type: 'button', class: 'chip', onclick: () => { grams.value = String(Math.round(g * 10) / 10); update(); } }, l === food.servingLabel && !/\bg\b/.test(l) ? `${l} (${k0.format(g)} g)` : l));
+      [food.servingLabel !== '100 g' ? food.servingLabel : null, food.serving],
+      [t('food.halfServing'), food.serving / 2], [t('food.twoServings'), food.serving * 2], [t('food.g100'), 100],
+    ].filter(([l]) => l).map(([l, g]) => h('button', { type: 'button', class: 'chip', onclick: () => { grams.value = String(Math.round(g * 10) / 10); update(); } }, l === food.servingLabel && !/\bg\b/.test(l) ? `${l} (${fmt(g)} ${t('unit.g')})` : l));
     update();
     const thumb = foodThumb(food, { size: 'lg', photos: photosOn(), userPhoto: F().myPhotos[food.id] });
+    const alt = foodAlt(food);
     return h('form', {
       class: 'sheet-body',
       onsubmit: (e) => {
@@ -241,28 +315,26 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
         if (!(g > 0 && g < 10000)) return;
         let chosen = food;
         const label = hasRecipe ? modsLabel(food, mult) : '';
-        if (label) {
-          chosen = { ...food, id: `${food.id}~${uid().slice(0, 6)}`, name: `${food.name} (${label})`.slice(0, 80), n: recipeN(food, mult), ing: null };
-        }
+        if (label) chosen = { ...food, id: `${food.id}~${uid().slice(0, 6)}`, name: `${food.name} (${label})`.slice(0, 80), ar: food.ar ? `${food.ar} (${label})`.slice(0, 80) : '', n: recipeN(food, mult), ing: null };
         done({ grams: g, meal: meal.value, food: chosen });
       },
     },
     h('div', { class: 'portion-head' },
       h('div', { class: 'thumb-col' }, thumb,
-        h('button', { type: 'button', class: 'link small', onclick: () => addMyPhoto(food, thumb) }, F().myPhotos[food.id] ? '📷 Change photo' : '📷 Add photo')),
+        h('button', { type: 'button', class: 'link small row', onclick: () => addMyPhoto(food, thumb) }, icon('camera', 'icon-sm'), F().myPhotos[food.id] ? t('photo.change') : t('photo.add'))),
       h('div', { class: 'grow-wrap' },
-        h('h2', {}, food.name),
-        food.fr || food.ar ? h('p', { class: 'muted small' }, food.fr || '', food.fr && food.ar ? ' · ' : '', food.ar ? h('bdi', { lang: 'ar' }, food.ar) : null) : null,
+        h('h2', {}, foodName(food)),
+        alt ? h('p', { class: 'muted small' }, h('bdi', { lang: altLang(food) }, alt)) : null,
         h('p', { class: 'muted small' }, food.brand ? `${food.brand} · ` : '', food.qty ? `${food.qty} · ` : '', sourceBadge(food),
-          food.where ? ` · ${WHERE_LABEL[food.where] || ''}` : ''))),
-    h('p', { class: 'muted small' }, `Per 100 g: ${macroLine(food.n)}`),
-    note ? h('p', { class: 'tip small' }, '📏 ', note) : null,
+          food.where ? ` · ${t(`where.${food.where}`)}` : ''))),
+    h('p', { class: 'muted small' }, t('food.per100', { line: macroLine(food.n) })),
+    note ? h('p', { class: 'tip small' }, note) : null,
     h('div', { class: 'chips' }, ...quick),
-    h('div', { class: 'row' }, h('label', { class: 'field grow' }, h('span', {}, 'Grams'), grams), h('label', { class: 'field grow' }, h('span', {}, 'Meal'), meal)),
+    h('div', { class: 'row' }, h('label', { class: 'field grow' }, h('span', {}, t('food.grams')), grams), h('label', { class: 'field grow' }, h('span', {}, t('food.meal')), meal)),
     preview,
     hasRecipe ? h('details', { class: 'ing-box', open: true },
-      h('summary', {}, 'Ingredients in this portion'),
-      h('p', { class: 'muted small' }, 'Remove or change an ingredient to see the new calories. Based on a typical recipe (USDA ingredient values).'),
+      h('summary', {}, t('food.ingInPortion')),
+      h('p', { class: 'muted small' }, t('food.ingHint')),
       ingList) : null,
     !hasRecipe && food.hasLabelIngredients ? h('details', {
       class: 'ing-box',
@@ -271,16 +343,16 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
         if (!box.open || box.dataset.loaded) return;
         box.dataset.loaded = '1';
         const text = box.querySelector('.label-ing');
-        try { text.textContent = (await labelIngredients(food)) || 'Not available.'; } catch { text.textContent = "Couldn't load the ingredients. Check your connection."; delete box.dataset.loaded; }
+        try { text.textContent = (await labelIngredients(food)) || t('food.notAvailable'); } catch { text.textContent = t('food.ingLoadFail'); delete box.dataset.loaded; }
       },
     },
-    h('summary', {}, 'Ingredients (from the label)'),
-    h('p', { class: 'small label-ing' }, 'Loading…'),
-    h('p', { class: 'muted small' }, 'Packaged product: the recipe is fixed, so ingredients can’t be removed.')) : null,
+    h('summary', {}, t('food.labelIng')),
+    h('p', { class: 'small label-ing', lang: 'fr' }, t('loading')),
+    h('p', { class: 'muted small' }, t('food.packaged'))) : null,
     h('div', { class: 'row end' },
-      edit ? h('button', { type: 'button', class: 'btn danger', onclick: () => done('delete') }, 'Delete') : null,
-      h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, 'Cancel'),
-      h('button', { type: 'submit', class: 'btn primary' }, okLabel || (edit ? 'Save' : 'Add'))));
+      edit ? h('button', { type: 'button', class: 'btn danger', onclick: () => done('delete') }, t('delete')) : null,
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, t('cancel')),
+      h('button', { type: 'submit', class: 'btn primary' }, okLabel || (edit ? t('save') : t('add')))));
   });
 }
 
@@ -288,11 +360,11 @@ function portionDialog(food, { grams: g0, meal: m0, edit = false, okLabel, note 
 function labelDialog({ code = '', name = '' } = {}) {
   return modal((done) => {
     const f = (ph, extra = {}) => h('input', { type: 'text', inputmode: 'decimal', placeholder: ph, ...extra });
-    const nm = h('input', { value: name, placeholder: 'e.g. Protein bar', maxlength: 80, autofocus: true, required: true });
-    const basis = h('select', {}, h('option', { value: 'serving' }, 'Per serving'), h('option', { value: '100' }, 'Per 100 g / 100 ml'));
-    const sg = f('e.g. 60', { value: '' });
-    const kcal = f('kcal'); const p = f('g'); const c = f('g'); const fat = f('g'); const fib = f('g (optional)');
-    const sgWrap = h('label', { class: 'field' }, h('span', {}, 'Serving size (g)'), sg);
+    const nm = h('input', { value: name, placeholder: t('label.namePh'), maxlength: 80, autofocus: true, required: true });
+    const basis = h('select', {}, h('option', { value: 'serving' }, t('label.perServing')), h('option', { value: '100' }, t('label.per100')));
+    const sg = f(t('label.egServing'));
+    const kcal = f(t('unit.kcal')); const p = f(t('unit.g')); const c = f(t('unit.g')); const fat = f(t('unit.g')); const fib = f(t('label.gOptional'));
+    const sgWrap = h('label', { class: 'field' }, h('span', {}, t('label.servingSize')), sg);
     basis.addEventListener('change', () => { sgWrap.hidden = basis.value === '100'; });
     const err = h('p', { class: 'error', hidden: true });
     const v = (el) => parseFloat(el.value.replace(',', '.'));
@@ -302,46 +374,47 @@ function labelDialog({ code = '', name = '' } = {}) {
         e.preventDefault();
         const per = basis.value === '100' ? 100 : v(sg);
         const vals = [v(kcal), v(p), v(c), v(fat)];
-        if (!(per > 0) || vals.some((x) => !(x >= 0))) { err.textContent = 'Fill in serving size, calories, protein, carbs and fat.'; err.hidden = false; return; }
+        if (!(per > 0) || vals.some((x) => !(x >= 0))) { err.textContent = t('label.fillAll'); err.hidden = false; return; }
         const k = 100 / per;
         const food = cleanFood({
           id: `you:${uid()}`, code, name: nm.value.trim(), source: 'You',
           n: { kcal: vals[0] * k, p: vals[1] * k, c: vals[2] * k, f: vals[3] * k, fib: (v(fib) || 0) * k },
-          serving: per, servingLabel: basis.value === '100' ? '100 g' : `1 serving (${per} g)`,
+          serving: per, servingLabel: basis.value === '100' ? '100 g' : `1 × ${per} g`,
         });
-        if (!food) { err.textContent = 'Those numbers look off. Check the label.'; err.hidden = false; return; }
+        if (!food) { err.textContent = t('label.looksOff'); err.hidden = false; return; }
         done(food);
       },
     },
-    h('h2', {}, 'Enter from the label'),
-    h('p', { class: 'muted small' }, code ? `Barcode ${code} will be remembered, so next time a scan finds it instantly (offline).` : 'Copy the numbers from the nutrition facts panel.'),
-    h('label', { class: 'field' }, h('span', {}, 'Name'), nm),
-    h('label', { class: 'field' }, h('span', {}, 'Values are'), basis),
+    h('h2', {}, t('label.title')),
+    h('p', { class: 'muted small' }, code ? t('label.codeRemembered', { code }) : t('label.copy')),
+    h('label', { class: 'field' }, h('span', {}, t('tr.name')), nm),
+    h('label', { class: 'field' }, h('span', {}, t('label.valuesAre')), basis),
     sgWrap,
     h('div', { class: 'grid2' },
-      h('label', { class: 'field' }, h('span', {}, 'Calories'), kcal),
-      h('label', { class: 'field' }, h('span', {}, 'Protein'), p),
-      h('label', { class: 'field' }, h('span', {}, 'Carbs'), c),
-      h('label', { class: 'field' }, h('span', {}, 'Fat'), fat),
-      h('label', { class: 'field' }, h('span', {}, 'Fiber'), fib)),
+      h('label', { class: 'field' }, h('span', {}, t('macro.kcal')), kcal),
+      h('label', { class: 'field' }, h('span', {}, t('macro.protein')), p),
+      h('label', { class: 'field' }, h('span', {}, t('macro.carbs')), c),
+      h('label', { class: 'field' }, h('span', {}, t('macro.fat')), fat),
+      h('label', { class: 'field' }, h('span', {}, t('macro.fiber')), fib)),
     err,
     h('div', { class: 'row end' },
-      h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, 'Cancel'),
-      h('button', { type: 'submit', class: 'btn primary' }, 'Save food')));
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, t('cancel')),
+      h('button', { type: 'submit', class: 'btn primary' }, t('label.save'))));
   });
 }
 
-const WHERE_LABEL = { supermarket: 'Supermarket', souk: 'Souk', street: 'Street food', cafe: 'Café', bakery: 'Bakery', home: 'Home cooking' };
+const WHERE = ['supermarket', 'souk', 'street', 'cafe', 'bakery', 'home'];
 const photosOn = () => F().photos !== false;
 
 function resultRow(food, onPick) {
+  const alt = foodAlt(food);
   return h('li', {},
     h('button', { class: 'result with-thumb', type: 'button', onclick: () => onPick(food) },
       foodThumb(food, { photos: photosOn(), userPhoto: F().myPhotos[food.id] }),
       h('span', { class: 'r-text' },
-        h('span', { class: 'r-name' }, food.name, food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null,
-          food.ar ? h('bdi', { class: 'r-ar', lang: 'ar' }, food.ar) : null),
-        h('span', { class: 'r-meta' }, sourceBadge(food), food.where ? ` ${WHERE_LABEL[food.where] || ''} ·` : '', ` ${k0.format(food.n.kcal)} kcal · ${k1.format(food.n.p)} g protein /100 g`))));
+        h('span', { class: 'r-name' }, foodName(food), food.brand ? h('span', { class: 'muted' }, ` · ${food.brand}`) : null,
+          alt ? h('bdi', { class: 'r-ar', lang: altLang(food) }, alt) : null),
+        h('span', { class: 'r-meta' }, sourceBadge(food), food.where ? ` ${t(`where.${food.where}`)} ·` : '', ` ${t('food.per100short', { kcal: fmt(food.n.kcal), p: fmt(food.n.p, 1) })}`))));
 }
 
 function dedupe(list) {
@@ -352,7 +425,7 @@ function dedupe(list) {
 /** Search sheet. Built-in + saved foods instantly; online sources on request. */
 function searchDialog(meal) {
   return modal((done) => {
-    const q = h('input', { type: 'search', placeholder: 'Search: msemen, Jaouda, harira, banane…', 'aria-label': 'Search foods', autofocus: true, enterkeyhint: 'search' });
+    const q = h('input', { type: 'search', placeholder: t('search.ph'), 'aria-label': t('search.label'), autofocus: true, enterkeyhint: 'search' });
     const list = h('ul', { class: 'results' });
     const online = h('ul', { class: 'results' });
     const status = h('p', { class: 'muted small' });
@@ -362,94 +435,91 @@ function searchDialog(meal) {
       list.replaceChildren(...res.map((f) => resultRow(f, pick)));
       if (!q.value.trim()) {
         const recent = F().saved.slice(0, 8);
-        list.replaceChildren(...(recent.length ? [h('li', { class: 'muted small label' }, 'Recent'), ...recent.map((f) => resultRow(f, pick))] : []));
+        list.replaceChildren(...(recent.length ? [h('li', { class: 'muted small label' }, t('search.recent')), ...recent.map((f) => resultRow(f, pick))] : []));
       }
     };
     const goOnline = async () => {
       const term = q.value.trim();
       if (!term) { q.focus(); return; }
       if (!await ensureOnline()) return;
-      status.textContent = 'Searching USDA and Open Food Facts…';
+      status.textContent = t('search.online');
       online.replaceChildren();
       const { results, failed } = await searchOnline(term, F().usdaKey);
       status.textContent = results.length
-        ? `${results.length} results from online sources${failed ? ' (one source did not respond)' : ''}.`
-        : failed === 2 ? "Couldn't reach the databases. Check your connection." : 'No online results. Try simpler words.';
+        ? `${tn('search.nResults', results.length)}${failed ? ` ${t('search.oneFailed')}` : ''}`
+        : failed === 2 ? t('search.unreachable') : t('search.noResults');
       online.replaceChildren(...results.map((f) => resultRow(f, pick)));
     };
     let timer = 0;
     q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(local, 120); }); // wait for a pause in typing
     local();
     return h('div', { class: 'sheet-body search' },
-      h('h2', {}, `Add to ${MEALS[meal]}`),
+      h('h2', {}, t('search.addTo', { meal: t(`meal.${meal}`) })),
       h('form', { onsubmit: (e) => { e.preventDefault(); goOnline(); } }, q),
       list,
       h('div', { class: 'row wrap' },
-        h('button', { class: 'btn ghost', type: 'button', onclick: goOnline }, '🌐 Search online'),
-        h('button', { class: 'btn ghost', type: 'button', onclick: () => done('label') }, '✎ Enter from label')),
+        h('button', { class: 'btn ghost', type: 'button', onclick: goOnline }, icon('globe', 'icon-sm'), t('search.onlineBtn')),
+        h('button', { class: 'btn ghost', type: 'button', onclick: () => done('label') }, icon('label', 'icon-sm'), t('search.fromLabel'))),
       status, online,
-      h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, 'Close')));
+      h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, t('close'))));
   });
 }
 
 function chooseDialog(code, results) {
   const agree = agreement(results);
   return modal((done) => h('div', { class: 'sheet-body' },
-    h('h2', {}, 'Found it'),
-    h('p', { class: 'muted small' }, `Barcode ${code}`),
+    h('h2', {}, t('bc.found')),
+    h('p', { class: 'muted small' }, t('bc.code', { code })),
     agree ? h('p', { class: agree.agree ? 'ok' : 'warn' }, agree.agree
-      ? `✓ ${results.length} sources agree on calories (${k0.format(agree.lo)}–${k0.format(agree.hi)} kcal/100 g).`
-      : `⚠ Sources disagree (${k0.format(agree.lo)}–${k0.format(agree.hi)} kcal/100 g). Compare with the label on the pack and pick the match.`) : null,
+      ? t('bc.agree', { n: fmt(results.length), lo: fmt(agree.lo), hi: fmt(agree.hi) })
+      : t('bc.disagree', { lo: fmt(agree.lo), hi: fmt(agree.hi) })) : null,
     h('ul', { class: 'results' }, ...results.map((f) => resultRow(f, done))),
     h('div', { class: 'row end' },
-      h('button', { class: 'btn ghost', onclick: () => done('label') }, 'None match: enter label'),
-      h('button', { class: 'btn ghost', onclick: () => done(null) }, 'Cancel'))));
+      h('button', { class: 'btn ghost', onclick: () => done('label') }, t('bc.noneMatch')),
+      h('button', { class: 'btn ghost', onclick: () => done(null) }, t('cancel')))));
 }
 
-/** Catalogue of Moroccan foods from the repo database, by where they're sold. */
+/** Catalogue of Moroccan foods, by where they're sold. */
 function browseDialog(meal) {
   return modal((done) => {
     let where = 'supermarket'; let cat = ''; let limit = 40;
-    const q = h('input', { type: 'search', placeholder: 'Filter (name, brand, Darija…)', 'aria-label': 'Filter Moroccan foods' });
+    const q = h('input', { type: 'search', placeholder: t('browse.filterPh'), 'aria-label': t('browse.filter') });
     const whereChips = h('div', { class: 'chips' });
     const catChips = h('div', { class: 'chips cats' });
     const list = h('ul', { class: 'results' });
     const status = h('p', { class: 'muted small' });
-    const more = h('button', { class: 'btn ghost wide', type: 'button', hidden: true, onclick: () => { limit += 60; draw(); } }, 'Show more');
+    const more = h('button', { class: 'btn ghost wide', type: 'button', hidden: true, onclick: () => { limit += 60; draw(); } }, t('showMore'));
     const draw = () => {
       const all = foodDb();
       if (!all.length) { list.replaceChildren(); return; }
-      whereChips.replaceChildren(...Object.entries(WHERE_LABEL).filter(([k]) => all.some((f) => f.where === k)).map(([k, l]) => h('button', {
+      whereChips.replaceChildren(...WHERE.filter((k) => all.some((f) => f.where === k)).map((k) => h('button', {
         type: 'button', class: `chip${k === where ? ' on' : ''}`, onclick: () => { where = k; cat = ''; limit = 40; draw(); },
-      }, l)));
+      }, t(`where.${k}`))));
       const inWhere = all.filter((f) => f.where === where);
       const cats = [...new Set(inWhere.map((f) => f.cat).filter(Boolean))].sort();
       catChips.replaceChildren(...['', ...cats].map((c) => h('button', {
         type: 'button', class: `chip small${c === cat ? ' on' : ''}`, onclick: () => { cat = c; limit = 40; draw(); },
-      }, c || 'All')));
+      }, c ? catName(c) : t('all'))));
       const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
       const shown = inWhere.filter((f) => (!cat || f.cat === cat) && words.every((w) => f.hay.includes(w)));
       list.replaceChildren(...shown.slice(0, limit).map((f) => resultRow(f, done)));
       more.hidden = shown.length <= limit;
-      status.textContent = `${shown.length} foods`;
+      status.textContent = tn('browse.nFoods', shown.length);
     };
     let timer = 0;
     q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { limit = 40; draw(); }, 120); });
     const off = onFoodDb(draw);
     const close = (v) => { off(); done(v); };
     if (!foodDb().length) {
-      status.textContent = 'Loading the Moroccan food list…';
-      loadFoodDb({ force: true }).then(draw).catch(() => {
-        status.textContent = "Couldn't download the food list. Check your connection and try again.";
-      });
+      status.textContent = t('browse.loading');
+      loadFoodDb({ force: true }).then(draw).catch(() => { status.textContent = t('browse.loadFail'); });
     }
     draw();
-    const meta = foodDbMeta();
     return h('div', { class: 'sheet-body search browse' },
-      h('h2', {}, `Moroccan foods · ${MEALS[meal]}`),
+      h('h2', {}, t('browse.title', { meal: t(`meal.${meal}`) })),
       whereChips, catChips, q, status, list, more,
-      h('p', { class: 'muted small' }, meta.attribution || ''),
-      h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => close(null) }, 'Close')));
+      h('p', { class: 'muted small' }, t('browse.attribution')),
+      h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => close(null) }, t('close'))));
   });
 }
 
@@ -457,29 +527,27 @@ function browseDialog(meal) {
 async function ensureAi() {
   const hosted = recognitionMode() === 'sample';
   if (F().ai && (hosted || F().aiKey)) return true;
-  const key = h('input', { type: 'password', value: F().aiKey, placeholder: 'sk-ant-…', autocomplete: 'off', 'aria-label': 'Anthropic API key' });
+  const key = h('input', { type: 'password', value: F().aiKey, placeholder: 'sk-ant-…', autocomplete: 'off', 'aria-label': t('ai.keyLabel'), dir: 'ltr' });
   const err = h('p', { class: 'error', hidden: true });
   const ok = await modal((done) => h('form', {
     class: 'sheet-body',
     onsubmit: (e) => {
       e.preventDefault();
-      if (!hosted && !/^sk-ant-[\w-]{10,}$/.test(key.value.trim())) { err.textContent = 'Paste an Anthropic API key (it starts with sk-ant-).'; err.hidden = false; return; }
+      if (!hosted && !/^sk-ant-[\w-]{10,}$/.test(key.value.trim())) { err.textContent = t('ai.keyInvalid'); err.hidden = false; return; }
       done(true);
     },
   },
-  h('h2', {}, 'Recognise food from a photo'),
-  h('p', {}, 'Claude looks at your photo, names each food (Moroccan dishes included), estimates the amount and its ingredients, and matches it to the food list. You check and adjust everything before it is logged.'),
+  h('h2', {}, t('ai.title')),
+  h('p', {}, t('ai.intro')),
   h('div', { class: 'alert warnbox' },
-    h('strong', {}, 'This sends the photo off your phone.'),
-    h('p', {}, hosted
-      ? 'The photo goes to Claude through your claude.ai account. Only the photo and the food list are sent: never your diary, body stats or other data.'
-      : 'The photo goes to Anthropic (the company that makes Claude) using your own API key. Only the photo and the food list are sent: never your diary, body stats or other data. Everything else in the app stays offline.')),
-  hosted ? null : h('label', { class: 'field' }, h('span', {}, 'Your Anthropic API key'), key),
-  hosted ? null : h('p', { class: 'muted small' }, 'Create one at console.anthropic.com (separate from a claude.ai subscription). It costs a few US cents per photo. The key stays on this phone, encrypted if you set a passcode.'),
+    h('strong', {}, t('ai.sends')),
+    h('p', {}, hosted ? t('ai.sendsHosted') : t('ai.sendsApi'))),
+  hosted ? null : h('label', { class: 'field' }, h('span', {}, t('ai.keyLabel')), key),
+  hosted ? null : h('p', { class: 'muted small' }, t('ai.keyHelp')),
   err,
   h('div', { class: 'row end' },
-    h('button', { type: 'button', class: 'btn ghost', onclick: () => done(false) }, 'Not now'),
-    h('button', { type: 'submit', class: 'btn primary' }, 'Turn on'))));
+    h('button', { type: 'button', class: 'btn ghost', onclick: () => done(false) }, t('notNow')),
+    h('button', { type: 'submit', class: 'btn primary' }, t('turnOn')))));
   if (!ok) return false;
   F().ai = true;
   if (!hosted) F().aiKey = key.value.trim();
@@ -487,28 +555,26 @@ async function ensureAi() {
   return true;
 }
 
-function pickPhoto() {
+export function pickPhoto({ camera = true } = {}) {
   return new Promise((resolve) => {
-    const input = h('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+    const input = h('input', { type: 'file', accept: 'image/*', capture: camera ? 'environment' : null });
     input.addEventListener('change', () => resolve(input.files[0] || null));
     input.click();
   });
 }
 
-function busy(text) {
+export function busy(text) {
   let close;
   modal((done) => { close = done; return h('div', { class: 'sheet-body center' }, h('div', { class: 'spinner', 'aria-hidden': 'true' }), h('p', {}, text)); });
   return () => close(null);
 }
 
+const aiFood = (x) => ({ id: `ai:${uid()}`, name: x.name, source: 'Photo estimate', n: x.n, serving: x.grams || 100, servingLabel: `${x.grams || 100} g` });
+
 function resultsDialog(result, meal) {
   const catalog = new Map(foodDb().map((f) => [f.id, f]));
   const items = result.items.map((x) => {
-    const match = x.catalogId && catalog.get(x.catalogId);
-    const food = match || {
-      id: `ai:${uid()}`, name: x.name, source: 'Photo estimate', n: x.n, serving: x.grams || 100,
-      servingLabel: `${x.grams || 100} g (from photo)`, emoji: '📸',
-    };
+    const food = (x.catalogId && catalog.get(x.catalogId)) || aiFood(x);
     return { ...x, food, grams: x.grams || food.serving, on: x.confidence !== 'low' || result.items.length === 1 };
   });
   return modal((done) => {
@@ -518,37 +584,38 @@ function resultsDialog(result, meal) {
     const draw = () => {
       list.replaceChildren(...items.map((it) => {
         const n = scale(it.food.n, it.grams);
-        const gIn = h('input', { type: 'text', inputmode: 'decimal', value: String(it.grams), 'aria-label': `${it.name} grams`, class: 'g-in' });
+        const nm = foodName(it.food);
+        const gIn = h('input', { type: 'text', inputmode: 'decimal', value: String(it.grams), 'aria-label': t('ai.gramsOf', { name: nm }), class: 'g-in' });
         gIn.addEventListener('change', () => { const v = parseFloat(gIn.value.replace(',', '.')); if (v > 0) { it.grams = v; draw(); } });
         return h('li', { class: it.on ? '' : 'off' },
-          h('input', { type: 'checkbox', checked: it.on, 'aria-label': `Log ${it.name}`, onchange: (e) => { it.on = e.target.checked; draw(); } }),
+          h('input', { type: 'checkbox', checked: it.on, 'aria-label': t('ai.logIt', { name: nm }), onchange: (e) => { it.on = e.target.checked; draw(); } }),
           foodThumb(it.food, { photos: photosOn(), userPhoto: F().myPhotos[it.food.id] }),
           h('div', { class: 'grow-wrap' },
-            h('div', {}, h('strong', {}, it.food.name), ' ', h('span', { class: `conf conf-${it.confidence}` }, it.confidence)),
-            it.food.id.startsWith('ai:') ? h('div', { class: 'muted small' }, 'Not in the food list: Claude’s estimate') : h('div', { class: 'muted small' }, `Matched: ${sourceBadge(it.food).textContent}`),
-            it.ingredients.length ? h('div', { class: 'muted small' }, `Seen: ${it.ingredients.map((i) => `${i.name} ${i.grams} g`).join(', ')}`) : null,
-            h('div', { class: 'row' }, gIn, h('span', { class: 'muted' }, 'g'), h('span', { class: 'ai-kcal' }, `${k0.format(n.kcal)} kcal · P ${k0.format(n.p)} g`),
+            h('div', {}, h('strong', {}, nm), ' ', h('span', { class: `conf conf-${it.confidence}` }, t(`conf.${it.confidence}`))),
+            it.food.id.startsWith('ai:') ? h('div', { class: 'muted small' }, t('ai.notInList')) : h('div', { class: 'muted small' }, t('ai.matched', { src: sourceBadge(it.food).textContent })),
+            it.ingredients.length ? h('div', { class: 'muted small' }, t('ai.seen', { list: it.ingredients.map((i) => `${i.name} ${fmt(i.grams)} ${t('unit.g')}`).join(', ') })) : null,
+            h('div', { class: 'row' }, gIn, h('span', { class: 'muted' }, t('unit.g')), h('span', { class: 'ai-kcal' }, t('ai.kcalP', { kcal: fmt(n.kcal), p: fmt(n.p) })),
               h('button', {
                 type: 'button', class: 'link small', onclick: async () => {
-                  const r = await portionDialog(it.food, { grams: it.grams, meal, okLabel: 'Use' });
+                  const r = await portionDialog(it.food, { grams: it.grams, meal, okLabel: t('ai.use') });
                   if (r && r !== 'delete') { it.food = r.food || it.food; it.grams = r.grams; it.on = true; draw(); }
                 },
-              }, it.food.ing ? 'Ingredients…' : 'Adjust…'))));
+              }, it.food.ing ? t('ai.ingredients') : t('ai.adjust')))));
       }));
       const sel = items.filter((i) => i.on);
-      total.textContent = `${k0.format(sum(sel.map((i) => scale(i.food.n, i.grams))).kcal)} kcal`;
-      logBtn.textContent = sel.length ? `Log ${sel.length} item${sel.length > 1 ? 's' : ''}` : 'Nothing selected';
+      total.textContent = t('food.kcalN', { n: fmt(sum(sel.map((i) => scale(i.food.n, i.grams))).kcal) });
+      logBtn.textContent = sel.length ? tn('ai.logN', sel.length) : t('ai.nothing');
       logBtn.disabled = !sel.length;
     };
     logBtn.addEventListener('click', () => done(items.filter((i) => i.on)));
     draw();
     return h('div', { class: 'sheet-body' },
-      h('div', { class: 'row' }, h('img', { src: result.photo, alt: 'Your photo', class: 'ai-photo' }), h('div', { class: 'grow-wrap' }, h('h2', {}, 'What Claude sees'), total)),
-      result.items.length ? null : h('p', { class: 'warn' }, 'No food recognised.'),
-      result.notes ? h('p', { class: 'muted small' }, result.notes) : null,
+      h('div', { class: 'row' }, h('img', { src: result.photo, alt: t('ai.yourPhoto'), class: 'ai-photo' }), h('div', { class: 'grow-wrap' }, h('h2', {}, t('ai.sees')), total)),
+      result.items.length ? null : h('p', { class: 'warn' }, t('ai.noneFound')),
+      result.notes ? h('p', { class: 'muted small', lang: 'en' }, result.notes) : null,
       list,
-      h('p', { class: 'muted small' }, 'Amounts from a photo are estimates (often ±20–30%). Check the grams, especially oil and sauces you can’t see.'),
-      h('div', { class: 'row end' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, 'Cancel'), logBtn));
+      h('p', { class: 'muted small' }, t('ai.estimates')),
+      h('div', { class: 'row end' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, t('cancel')), logBtn));
   });
 }
 
@@ -557,13 +624,13 @@ async function recognizeFlow(meal = defaultMeal()) {
   const file = await pickPhoto();
   if (!file) return;
   const catalog = foodDb().filter((f) => f.where && f.where !== 'supermarket').map((f) => ({ id: f.id, name: f.name, fr: f.fr }));
-  const stop = busy('Claude is looking at your photo…');
+  const stop = busy(t('ai.looking'));
   let result;
   try {
     result = await recognizeFood(file, catalog, { apiKey: F().aiKey });
   } catch (err) {
     stop();
-    toast(err instanceof RecognitionError ? err.message : 'Recognition failed. Try again.');
+    toast(err instanceof RecognitionError ? err.message : t('ai.err.failed'));
     if (err?.code === 'auth') { F().ai = false; await ctx.save(); }
     return;
   }
@@ -576,7 +643,7 @@ async function recognizeFlow(meal = defaultMeal()) {
     F().log.push({ ...cleanFood(it.food), id: uid(), day: foodDay, ts, grams: it.grams, meal });
   }
   await ctx.commit();
-  toast(`Logged ${chosen.length} item${chosen.length > 1 ? 's' : ''}`);
+  toast(tn('ai.loggedN', chosen.length));
 }
 
 // ---------- Scan & teach: on-device visual memory of your foods ----------
@@ -587,14 +654,14 @@ function captureScan() {
   return new Promise((resolve) => {
     let stream = null; let running = true;
     const video = h('video', { playsinline: true, muted: true, autoplay: true, class: 'scan-video' });
-    const status = h('p', { class: 'scan-status' }, 'Starting camera…');
+    const status = h('p', { class: 'scan-status' }, t('scan.starting'));
     const bar = h('div', { class: 'progress scan-progress' }, h('div', { css: { width: '0%' } }));
-    const startBtn = h('button', { class: 'btn primary big-btn', type: 'button', disabled: true }, 'Start scan');
+    const startBtn = h('button', { class: 'btn primary big-btn', type: 'button', disabled: true }, t('scan.start'));
     const photos = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
     const dlg = h('dialog', { class: 'scanner' });
     const finish = (val) => {
       running = false;
-      stream?.getTracks().forEach((t) => t.stop());
+      stream?.getTracks().forEach((x) => x.stop());
       dlg.close(); dlg.remove();
       resolve(val);
     };
@@ -613,7 +680,7 @@ function captureScan() {
       startBtn.disabled = true;
       const prints = []; const covers = []; let thumb = ''; let blob = null;
       for (let i = 0; i < FRAMES && running; i++) {
-        status.textContent = i < FRAMES / 2 ? 'Move slowly to the left around the food…' : '…and now slowly to the right';
+        status.textContent = i < FRAMES / 2 ? t('scan.moveLeft') : t('scan.moveRight');
         const view = snap(video, 224);
         prints.push(fingerprint(view));
         const cov = plateCoverage(view);
@@ -628,9 +695,9 @@ function captureScan() {
     photos.addEventListener('change', async () => {
       const files = [...photos.files].slice(0, 6);
       if (!files.length) return;
-      status.textContent = 'Reading photos…';
+      status.textContent = t('scan.reading');
       try {
-        await prepareScanner((t) => { status.textContent = t; });
+        await prepareScanner((x) => { status.textContent = x; });
         const prints = []; const covers = []; let thumb = ''; let blob = null;
         for (const f of files) {
           const url = URL.createObjectURL(f);
@@ -644,7 +711,7 @@ function captureScan() {
         }
         finish({ prints, thumb, blob, coverage: covers.length ? medianOf(covers) : null });
       } catch {
-        status.textContent = "Couldn't read those photos.";
+        status.textContent = t('scan.photosFail');
       }
     });
 
@@ -654,8 +721,8 @@ function captureScan() {
         status, bar,
         startBtn,
         h('div', { class: 'row' },
-          h('button', { class: 'btn ghost', type: 'button', onclick: () => photos.click() }, '🖼 Use photos instead'),
-          h('button', { class: 'btn ghost', type: 'button', onclick: () => finish(null) }, 'Cancel')),
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => photos.click() }, icon('image', 'icon-sm'), t('scan.usePhotos')),
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => finish(null) }, t('cancel'))),
         photos),
     );
     document.body.append(dlg);
@@ -663,25 +730,25 @@ function captureScan() {
 
     (async () => {
       try {
-        await prepareScanner((t) => { status.textContent = t; });
+        await prepareScanner((x) => { status.textContent = x; });
       } catch {
-        status.textContent = "The scanner couldn't load. Check your connection the first time you use it.";
+        status.textContent = t('scan.loadFail');
         return;
       }
       if (globalThis.POCKET_STATS_HOSTED || !navigator.mediaDevices?.getUserMedia) {
-        status.textContent = 'Live camera is not available here. Use photos instead (2–6 from different angles).';
+        status.textContent = t('scan.noLive');
         return;
       }
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
       } catch {
-        status.textContent = 'Camera permission was denied. You can use photos instead.';
+        status.textContent = t('scan.denied');
         return;
       }
-      if (!running) { stream.getTracks().forEach((t) => t.stop()); return; }
+      if (!running) { stream.getTracks().forEach((x) => x.stop()); return; }
       video.srcObject = stream;
       await video.play().catch(() => {});
-      status.textContent = 'Fit the plate or bowl inside the circle, then press Start and move slowly around it. The circle is the ruler for the portion size.';
+      status.textContent = t('scan.fit');
       startBtn.disabled = false;
     })();
   });
@@ -689,24 +756,23 @@ function captureScan() {
 
 function scanResultsDialog(scan, ranked) {
   const lib = F().scans;
+  const n = Object.keys(lib).length;
   const shown = ranked.map((r, i) => ({ ...r, conf: confidence(r.score, r.score - (ranked[i + 1]?.score ?? 0)) })).filter((r) => r.conf).slice(0, 3);
   return modal((done) => h('div', { class: 'sheet-body' },
-    h('div', { class: 'row' }, h('img', { src: scan.thumb, alt: 'Your scan', class: 'ai-photo' }),
-      h('div', { class: 'grow-wrap' }, h('h2', {}, shown.length ? 'Is it one of these?' : 'New food'),
-        h('p', { class: 'muted small' }, Object.keys(lib).length
-          ? `Compared with ${Object.keys(lib).length} food${Object.keys(lib).length > 1 ? 's' : ''} you've taught the app. Nothing left your phone.`
-          : 'You haven’t taught the app any foods yet. Link this scan to a food and it will recognise it next time.'))),
+    h('div', { class: 'row' }, h('img', { src: scan.thumb, alt: t('scan.yourScan'), class: 'ai-photo' }),
+      h('div', { class: 'grow-wrap' }, h('h2', {}, shown.length ? t('scan.oneOfThese') : t('scan.newFood')),
+        h('p', { class: 'muted small' }, n ? tn('scan.compared', n) : t('scan.noneTaught')))),
     shown.length ? h('ul', { class: 'results' }, ...shown.map((r) => h('li', {},
       h('button', { class: 'result with-thumb', type: 'button', onclick: () => done({ type: 'match', id: r.id }) },
         foodThumb(r.rec.food, { photos: photosOn(), userPhoto: F().myPhotos[r.rec.food.id] }),
-        h('span', { class: 'r-text' }, h('span', { class: 'r-name' }, r.rec.food.name),
-          h('span', { class: 'r-meta' }, h('span', { class: `conf conf-${r.conf.level}` }, r.conf.label), ` · ${Math.round(r.score * 100)}% similar`,
-            (() => { const e = portionFromScan(r.rec, scan); return e ? h('strong', { class: 'r-portion' }, ` · ≈ ${e.grams} g`) : ''; })())))))) : null,
-    scan.coverage !== null && scan.coverage !== undefined ? h('p', { class: 'muted small' }, `Food covers about ${Math.round(scan.coverage * 100)}% of the plate.`) : null,
+        h('span', { class: 'r-text' }, h('span', { class: 'r-name' }, foodName(r.rec.food)),
+          h('span', { class: 'r-meta' }, h('span', { class: `conf conf-${r.conf.level}` }, t(`conf.${r.conf.level}`)), ` · ${t('scan.similar', { n: fmt(r.score * 100) })}`,
+            (() => { const e = portionFromScan(r.rec, scan); return e ? h('strong', { class: 'r-portion' }, ` · ≈ ${fmt(e.grams)} ${t('unit.g')}`) : ''; })())))))) : null,
+    scan.coverage !== null && scan.coverage !== undefined ? h('p', { class: 'muted small' }, t('scan.covers', { n: fmt(scan.coverage * 100) })) : null,
     h('div', { class: 'stack' },
-      h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'link' }) }, shown.length ? '🔗 No: link it to another food' : '🔗 Link this scan to a food'),
-      F().ai ? h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'claude' }) }, '📸 Ask Claude what it is (sends this photo)') : null,
-      h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, 'Cancel'))));
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'link' }) }, shown.length ? t('scan.linkOther') : t('scan.link')),
+      F().ai ? h('button', { class: 'btn ghost', type: 'button', onclick: () => done({ type: 'claude' }) }, t('scan.askClaude')) : null,
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, t('cancel')))));
 }
 
 /** Grams estimated from this scan's plate coverage, for foods you've logged before (not packaged products). */
@@ -717,22 +783,22 @@ function portionFromScan(rec, scan) {
 
 function pickOneDialog(items) {
   return modal((done) => h('div', { class: 'sheet-body' },
-    h('h2', {}, 'Which one did you scan?'),
+    h('h2', {}, t('scan.whichOne')),
     h('ul', { class: 'results' }, ...items.map((it) => resultRow(it.food, () => done(it)))),
-    h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, 'Cancel'))));
+    h('div', { class: 'row end' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => done(null) }, t('cancel')))));
 }
 
 async function teachAndLog(food, scan, meal, claudeGrams) {
   const prev = F().scans[food.id];
   const est = portionFromScan(prev, scan);
   const grams = claudeGrams || est?.grams || prev?.lastGrams || undefined;
-  const pct = scan.coverage > 0.03 ? `food covers about ${Math.round(scan.coverage * 100)}% of the plate` : '';
+  const pct = scan.coverage > 0.03 ? fmt(scan.coverage * 100) : null;
   const note = est
-    ? `≈ ${est.grams} g from your scan (${pct}; based on ${est.basedOn} earlier portion${est.basedOn > 1 ? 's' : ''}). Adjust if needed: the app learns from what you log.`
-    : claudeGrams ? `${claudeGrams} g is Claude’s estimate. Correct it if needed: the app learns portion sizes from what you log.`
+    ? tn('scan.noteEst', est.basedOn, { g: fmt(est.grams), pct: pct ?? '?' })
+    : claudeGrams ? t('scan.noteClaude', { g: fmt(claudeGrams) })
       : food.source === 'Open Food Facts' ? null
-        : pct ? `First portion for this food: enter the grams once (${pct}), and future scans will estimate it.` : null;
-  const r = await portionDialog(food, { meal, grams, okLabel: 'Log & remember', note });
+        : pct ? t('scan.noteFirst', { pct }) : null;
+  const r = await portionDialog(food, { meal, grams, okLabel: t('scan.logRemember'), note });
   if (!r || r === 'delete') return;
   let rec = learn(prev, food, scan.prints);
   rec.sizes = prev?.sizes || [];
@@ -753,7 +819,7 @@ async function scanTeachFlow(meal = defaultMeal()) {
   if (choice.type === 'match') {
     const rec = F().scans[choice.id];
     const fresh = foodDb().find((f) => f.id === rec.food.id) || rec.food; // latest values if it's from the food list
-    return teachAndLog(fresh, scan, meal); // grams: estimated from the scan, else your usual portion
+    return teachAndLog(fresh, scan, meal);
   }
   if (choice.type === 'link') {
     let food = await searchDialog(meal);
@@ -763,18 +829,18 @@ async function scanTeachFlow(meal = defaultMeal()) {
   }
   if (choice.type === 'claude') {
     if (!await ensureAi()) return;
-    const stop = busy('Claude is looking at your scan…');
+    const stop = busy(t('ai.lookingScan'));
     let result;
     try {
       const catalog = foodDb().filter((f) => f.where && f.where !== 'supermarket').map((f) => ({ id: f.id, name: f.name, fr: f.fr }));
       result = await recognizeFood(scan.blob, catalog, { apiKey: F().aiKey });
     } catch (err) {
-      stop(); toast(err instanceof RecognitionError ? err.message : 'Recognition failed. Try again.'); return;
+      stop(); toast(err instanceof RecognitionError ? err.message : t('ai.err.failed')); return;
     }
     stop();
     const catalogById = new Map(foodDb().map((f) => [f.id, f]));
-    const items = result.items.map((x) => ({ ...x, food: (x.catalogId && catalogById.get(x.catalogId)) || { id: `ai:${uid()}`, name: x.name, source: 'Photo estimate', n: x.n, serving: x.grams || 100, servingLabel: `${x.grams || 100} g (from photo)`, emoji: '📸' } }));
-    if (!items.length) { toast('Claude didn’t find food in this scan.'); return; }
+    const items = result.items.map((x) => ({ ...x, food: (x.catalogId && catalogById.get(x.catalogId)) || aiFood(x) }));
+    if (!items.length) { toast(t('ai.noneInScan')); return; }
     const it = items.length === 1 ? items[0] : await pickOneDialog(items);
     if (it) return teachAndLog(it.food, scan, meal, it.grams);
   }
@@ -807,13 +873,13 @@ async function scanFlow() {
   const local = F().moroccoDb ? (findByCode(code) || findByCode(raw)) : null;
   if (local) return pickAndLog(local);
   if (!await ensureOnline()) {
-    toast(globalThis.POCKET_STATS_HOSTED ? `Barcode ${code} read. Enter its label once; next time this scan finds it instantly.` : 'Not in your saved foods. Enter it from the label instead.');
+    toast(globalThis.POCKET_STATS_HOSTED ? t('bc.readHosted', { code }) : t('bc.notSaved'));
     return pickAndLog(await labelDialog({ code }));
   }
-  toast('Looking up…');
+  toast(t('bc.lookingUp'));
   const { results, failed } = await lookupBarcode(code, F().usdaKey);
   if (!results.length) {
-    toast(failed === 2 ? "Couldn't reach the databases. Enter it from the label." : 'Not in any database yet. Enter it from the label.');
+    toast(failed === 2 ? t('bc.unreachable') : t('bc.notInDb'));
     return pickAndLog(await labelDialog({ code }));
   }
   const choice = results.length === 1 ? results[0] : await chooseDialog(code, results);
@@ -824,71 +890,49 @@ async function scanFlow() {
 async function editEntry(e) {
   const r = await portionDialog(e, { grams: e.grams, meal: e.meal, edit: true });
   if (!r) return;
-  if (r === 'delete') F().log = F().log.filter((x) => x !== e);
-  else { e.grams = r.grams; e.meal = r.meal; }
+  if (r === 'delete') {
+    F().log = F().log.filter((x) => x !== e);
+    if (e.slot) { const l = F().meals.logged[e.day]; if (l && l[e.slot] === e.id) delete l[e.slot]; }
+  } else { e.grams = r.grams; e.meal = r.meal; }
   await ctx.commit();
-}
-
-// ---------- icons (one consistent line style) ----------
-const ICONS = {
-  scan: 'M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 13.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
-  barcode: 'M4 6v12M7 6v12M10.5 6v12M13 6v12M16.5 6v12M20 6v12',
-  search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM20 20l-4.8-4.8',
-  star: 'M12 3l2.7 2.7h3.6v3.6L21 12l-2.7 2.7v3.6h-3.6L12 21l-2.7-2.7H5.7v-3.6L3 12l2.7-2.7V5.7h3.6z',
-  camera: 'M4 8.5h3.2l1.6-2.5h6.4l1.6 2.5H20V19H4zM12 16.5a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z',
-  label: 'M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8zM14 3v5h5M8.5 12.5h7M8.5 16h5',
-};
-
-function lineIcon(d) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('class', 'line-icon');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  p.setAttribute('d', d);
-  svg.append(p);
-  return svg;
 }
 
 // ---------- profile ----------
 function profileDialog() {
-  const p = F().profile || { sex: 'male', age: 25, heightCm: 178, weightKg: 75, activity: 1.55, goal: 'lean', units: 'metric', diet: 'omnivore' };
+  const p = F().profile || DEFAULT_PROFILE;
   return modal((done) => {
     let units = p.units;
-    const sex = h('select', {}, h('option', { value: 'male', selected: p.sex === 'male' }, 'Male'), h('option', { value: 'female', selected: p.sex === 'female' }, 'Female'));
+    const sex = h('select', {}, h('option', { value: 'male', selected: p.sex === 'male' }, t('prof.male')), h('option', { value: 'female', selected: p.sex === 'female' }, t('prof.female')));
     const age = h('input', { type: 'text', inputmode: 'numeric', value: String(p.age) });
-    const hA = h('input', { type: 'text', inputmode: 'decimal' }); const hB = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'in' });
+    const hA = h('input', { type: 'text', inputmode: 'decimal' }); const hB = h('input', { type: 'text', inputmode: 'decimal', placeholder: t('prof.in') });
     const w = h('input', { type: 'text', inputmode: 'decimal' });
     const hLabel = h('span', {}); const wLabel = h('span', {});
-    const setUnits = (u, convert) => {
-      if (convert) {
-        const cur = read();
-        units = u;
-        fill(cur.heightCm, cur.weightKg);
-      } else { units = u; fill(p.heightCm, p.weightKg); }
-      seg.querySelectorAll('.chip').forEach((b) => b.classList.toggle('on', b.dataset.u === units));
-    };
-    const fill = (cm, kg) => {
-      if (units === 'imperial') {
-        const inches = (cm || 0) / 2.54;
-        hA.value = String(Math.floor(inches / 12)); hB.value = String(Math.round(inches % 12)); hB.hidden = false;
-        hA.placeholder = 'ft'; w.value = String(Math.round((kg || 0) / LB)); hLabel.textContent = 'Height (ft, in)'; wLabel.textContent = 'Weight (lb)';
-      } else {
-        hA.value = String(Math.round(cm || 0)); hB.hidden = true; hA.placeholder = 'cm';
-        w.value = String(Math.round((kg || 0) * 10) / 10); hLabel.textContent = 'Height (cm)'; wLabel.textContent = 'Weight (kg)';
-      }
-    };
+    let seg;
     const n = (el) => parseFloat(String(el.value).replace(',', '.'));
     const read = () => ({
       heightCm: units === 'imperial' ? ((n(hA) || 0) * 12 + (n(hB) || 0)) * 2.54 : n(hA),
       weightKg: units === 'imperial' ? n(w) * LB : n(w),
     });
-    const seg = h('div', { class: 'chips seg2' },
-      h('button', { type: 'button', class: 'chip', 'data-u': 'metric', onclick: () => setUnits('metric', true) }, 'kg / cm'),
-      h('button', { type: 'button', class: 'chip', 'data-u': 'imperial', onclick: () => setUnits('imperial', true) }, 'lb / ft'));
-    const activity = h('select', {}, ...Object.entries(ACTIVITY).map(([k, v]) => h('option', { value: k, selected: +k === p.activity }, v)));
-    const goal = h('select', {}, ...Object.entries(GOALS).map(([k, v]) => h('option', { value: k, selected: k === p.goal }, v.label)));
-    const diet = h('select', {}, h('option', { value: 'omnivore', selected: p.diet === 'omnivore' }, 'I eat everything'), h('option', { value: 'vegetarian', selected: p.diet === 'vegetarian' }, 'Vegetarian'));
+    const fill = (cm, kg) => {
+      if (units === 'imperial') {
+        const inches = (cm || 0) / 2.54;
+        hA.value = String(Math.floor(inches / 12)); hB.value = String(Math.round(inches % 12)); hB.hidden = false;
+        hA.placeholder = t('prof.ft'); w.value = String(Math.round((kg || 0) / LB)); hLabel.textContent = t('prof.heightFt'); wLabel.textContent = t('prof.weightLb');
+      } else {
+        hA.value = String(Math.round(cm || 0)); hB.hidden = true; hA.placeholder = t('prof.cm');
+        w.value = String(Math.round((kg || 0) * 10) / 10); hLabel.textContent = t('prof.heightCm'); wLabel.textContent = t('prof.weightKg');
+      }
+    };
+    const setUnits = (u, convert) => {
+      if (convert) { const cur = read(); units = u; fill(cur.heightCm, cur.weightKg); } else { units = u; fill(p.heightCm, p.weightKg); }
+      seg.querySelectorAll('.chip').forEach((b) => b.classList.toggle('on', b.dataset.u === units));
+    };
+    seg = h('div', { class: 'chips seg' },
+      h('button', { type: 'button', class: 'chip', 'data-u': 'metric', onclick: () => setUnits('metric', true) }, t('prof.metric')),
+      h('button', { type: 'button', class: 'chip', 'data-u': 'imperial', onclick: () => setUnits('imperial', true) }, t('prof.imperial')));
+    const activity = h('select', {}, ...Object.keys(ACTIVITY).map((k) => h('option', { value: k, selected: +k === p.activity }, t(`act.${k}`))));
+    const goal = h('select', {}, ...Object.keys(GOALS).map((k) => h('option', { value: k, selected: k === p.goal }, t(`goal.${k}`))));
+    const diet = h('select', {}, h('option', { value: 'omnivore', selected: p.diet === 'omnivore' }, t('prof.omnivore')), h('option', { value: 'vegetarian', selected: p.diet === 'vegetarian' }, t('prof.vegetarian')));
     const err = h('p', { class: 'error', hidden: true });
     setUnits(units, false);
     return h('form', {
@@ -896,31 +940,38 @@ function profileDialog() {
       onsubmit: (e) => {
         e.preventDefault();
         const { heightCm, weightKg } = read();
-        const prof = normalizeFood({ profile: { sex: sex.value, age: n(age), heightCm, weightKg, activity: +activity.value, goal: goal.value, units, diet: diet.value } }).profile;
-        if (!prof) { err.textContent = 'Check your age (13+), height and weight.'; err.hidden = false; return; }
+        const prof = cleanProfile({ sex: sex.value, age: n(age), heightCm, weightKg, activity: +activity.value, goal: goal.value, units, diet: diet.value });
+        if (!prof) { err.textContent = t('prof.check'); err.hidden = false; return; }
         done(prof);
       },
     },
-    h('h2', {}, 'Your body & goal'),
-    h('p', { class: 'muted small' }, 'Used only to calculate your targets. Stored on this phone (encrypted if you set a passcode).'),
+    h('h2', {}, t('prof.title')),
+    h('p', { class: 'muted small' }, t('prof.used')),
     seg,
     h('div', { class: 'grid2' },
-      h('label', { class: 'field' }, h('span', {}, 'Sex'), sex),
-      h('label', { class: 'field' }, h('span', {}, 'Age'), age),
+      h('label', { class: 'field' }, h('span', {}, t('prof.sex')), sex),
+      h('label', { class: 'field' }, h('span', {}, t('prof.age')), age),
       h('div', { class: 'field' }, hLabel, h('div', { class: 'row' }, hA, hB)),
       h('label', { class: 'field' }, wLabel, w)),
-    h('label', { class: 'field' }, h('span', {}, 'Activity'), activity),
-    h('label', { class: 'field' }, h('span', {}, 'Goal'), goal),
-    h('label', { class: 'field' }, h('span', {}, 'Diet'), diet),
+    h('label', { class: 'field' }, h('span', {}, t('prof.activity')), activity),
+    h('label', { class: 'field' }, h('span', {}, t('prof.goal')), goal),
+    h('label', { class: 'field' }, h('span', {}, t('prof.diet')), diet),
     err,
     h('div', { class: 'row end' },
-      h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, 'Cancel'),
-      h('button', { type: 'submit', class: 'btn primary' }, 'Calculate my targets')));
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => done(null) }, t('cancel')),
+      h('button', { type: 'submit', class: 'btn primary' }, t('prof.calc'))));
   });
 }
 
 function weightTracker() {
-  return ctx.state.trackers.find((t) => t.type === 'number' && /^(body ?)?weight$/i.test(t.name));
+  return ctx.state.trackers.find((x) => x.type === 'number' && (x.starter === 'weight' || /^(body ?)?weight$/i.test(x.name)));
+}
+
+/** Weights in kg ({day, kg}) from the Weight tracker, for the meal plan's weekly checks. */
+export function weightsKg(state) {
+  const wt = state.trackers.find((x) => x.type === 'number' && (x.starter === 'weight' || /^(body ?)?weight$/i.test(x.name)));
+  if (!wt) return [];
+  return state.entries.filter((e) => e.trackerId === wt.id).map((e) => ({ day: e.day, kg: wt.unit === 'lb' ? e.value * LB : e.value }));
 }
 
 async function editProfile() {
@@ -931,7 +982,7 @@ async function editProfile() {
   const unit = prof.units === 'imperial' ? 'lb' : 'kg';
   let wt = weightTracker();
   if (!wt) {
-    wt = { id: uid(), name: 'Weight', type: 'number', unit, agg: 'last', goal: null, color: '#5f6b7a' };
+    wt = { id: uid(), name: 'Weight', starter: 'weight', type: 'number', unit, agg: 'last', goal: null, color: '#A3B1AB' };
     ctx.state.trackers.push(wt);
   }
   const today = dayKey();
@@ -940,29 +991,35 @@ async function editProfile() {
     ctx.state.entries.push({ id: uid(), trackerId: wt.id, day: today, value: Math.round(v * 10) / 10, ts: Date.now() });
   }
   await ctx.commit();
-  toast('Targets updated');
+  toast(t('prof.updated'));
 }
 
 // ---------- views ----------
-function bar(label, val, target, cls, unit = 'g') {
+function bar(label, val, target, cls) {
   const pct = target ? Math.min(1, val / target) : 0;
   const over = target && val > target * 1.05;
   return h('div', { class: `mbar ${cls}` },
-    h('div', { class: 'row' }, h('span', { class: 'grow' }, label), h('span', { class: over ? 'warn' : '' }, `${k0.format(val)} / ${k0.format(target)} ${unit}`)),
-    h('div', { class: 'progress' }, h('div', { css: { width: `${pct * 100}%` } })));
+    h('div', { class: 'row' }, h('span', { class: 'grow' }, label), h('span', { class: over ? 'warn' : '' }, `${fmt(val)} / ${fmt(target)} ${t('unit.g')}`)),
+    h('div', { class: 'progress thin' }, h('div', { css: { width: `${pct * 100}%` } })));
 }
 
-function summaryCard(t, tot) {
-  const left = t.kcal - tot.kcal;
+function summaryCard(tg, tot) {
+  const left = tg.kcal - tot.kcal;
   return h('article', { class: 'card summary' },
     h('div', { class: 'kcal-row' },
-      h('div', {}, h('div', { class: 'big' }, k0.format(tot.kcal)), h('div', { class: 'muted small' }, `of ${k0.format(t.kcal)} kcal`)),
-      h('div', { class: 'right' }, h('div', { class: `big ${left < 0 ? 'warn' : ''}` }, k0.format(Math.abs(left))), h('div', { class: 'muted small' }, left >= 0 ? 'kcal left' : 'kcal over'))),
-    h('div', { class: 'progress kcal' }, h('div', { css: { width: `${Math.min(100, (tot.kcal / t.kcal) * 100)}%` } })),
-    bar('Protein', tot.p, t.protein, 'm-p'),
-    bar('Carbs', tot.c, t.carbs, 'm-c'),
-    bar('Fat', tot.f, t.fat, 'm-f'),
-    h('p', { class: 'muted small' }, `Fiber ${k0.format(tot.fib)} g (aim for 25–38 g)`));
+      h('div', {}, h('div', { class: 'big' }, fmt(tot.kcal)), h('div', { class: 'muted small' }, t('food.ofKcal', { n: fmt(tg.kcal) }))),
+      h('div', { class: 'right' }, h('div', { class: `big ${left < 0 ? 'warn' : ''}` }, fmt(Math.abs(left))), h('div', { class: 'muted small' }, left >= 0 ? t('food.kcalLeft') : t('food.kcalOver')))),
+    h('div', { class: 'progress' }, h('div', { css: { width: `${Math.min(100, (tot.kcal / tg.kcal) * 100)}%` } })),
+    h('div', { class: 'macro-grid' },
+      bar(t('macro.protein'), tot.p, tg.protein, 'm-p'),
+      bar(t('macro.carbs'), tot.c, tg.carbs, 'm-c'),
+      bar(t('macro.fat'), tot.f, tg.fat, 'm-f')),
+    h('p', { class: 'muted small' }, t('food.fiber', { n: fmt(tot.fib) })));
+}
+
+/** Diary targets: the meal plan's day target when it's on, else the profile's. */
+function diaryTargets(p) {
+  return targets(p);
 }
 
 function viewDiary() {
@@ -970,137 +1027,70 @@ function viewDiary() {
   const today = dayKey();
   const entries = dayLog(foodDay);
   const tot = totals(entries);
-  const t = p ? targets(p) : null;
+  const tg = p ? diaryTargets(p) : null;
 
   const nav = h('header', { class: 'day-nav' },
-    h('button', { class: 'icon-btn', 'aria-label': 'Previous day', onclick: () => { foodDay = addDays(foodDay, -1); ctx.render(); } }, '‹'),
+    iconButton('back', t('day.prev'), () => { foodDay = addDays(foodDay, -1); ctx.render(); }),
     h('div', { class: 'day-title' }, h('h1', {}, dayLabel(foodDay)),
-      foodDay !== today ? h('button', { class: 'link', onclick: () => { foodDay = today; ctx.render(); } }, 'Back to today') : null),
-    h('button', { class: 'icon-btn', 'aria-label': 'Next day', disabled: foodDay >= today, onclick: () => { foodDay = addDays(foodDay, 1); ctx.render(); } }, '›'));
+      foodDay !== today ? h('button', { class: 'link small', onclick: () => { foodDay = today; ctx.render(); } }, t('day.backToToday')) : null),
+    h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('day.next'), disabled: foodDay >= today, onclick: () => { foodDay = addDays(foodDay, 1); ctx.render(); } }, icon('next')));
 
-  const tile = (label, sub, path, onclick, primary) => h('button', { class: `add-tile${primary ? ' primary' : ''}`, type: 'button', onclick },
-    lineIcon(path), h('span', { class: 'add-label' }, label), h('span', { class: 'add-sub' }, sub));
+  const tile = (label, subl, name, onclick, primary) => h('button', { class: `add-tile${primary ? ' primary' : ''}`, type: 'button', onclick },
+    icon(name), h('span', { class: 'add-label' }, label), h('span', { class: 'add-sub' }, subl));
   const actions = h('article', { class: 'card add-food' },
-    h('h2', {}, 'Add food'),
+    h('h2', {}, t('food.addFood')),
     h('div', { class: 'add-grid' },
-      tile('Scan food', 'learns your plates', ICONS.scan, () => scanTeachFlow(), true),
-      tile('Barcode', 'packaged products', ICONS.barcode, scanFlow),
-      tile('Search', 'name or Darija', ICONS.search, () => searchFlow()),
-      F().moroccoDb ? tile('Moroccan', 'souk, street, shops', ICONS.star, () => browseFlow()) : null,
-      tile('Ask Claude', 'from a photo', ICONS.camera, () => recognizeFlow()),
-      tile('From label', 'type the numbers', ICONS.label, async () => pickAndLog(await labelDialog()))));
+      tile(t('tile.scan'), t('tile.scanSub'), 'scan', () => scanTeachFlow(), true),
+      tile(t('tile.barcode'), t('tile.barcodeSub'), 'barcode', scanFlow),
+      tile(t('tile.search'), t('tile.searchSub'), 'search', () => searchFlow()),
+      F().moroccoDb ? tile(t('tile.moroccan'), t('tile.moroccanSub'), 'souk', () => browseFlow()) : null,
+      tile(t('tile.claude'), t('tile.claudeSub'), 'camera', () => recognizeFlow()),
+      tile(t('tile.label'), t('tile.labelSub'), 'label', async () => pickAndLog(await labelDialog()))));
 
-  const setup = !p ? h('article', { class: 'card callout' },
-    h('h2', {}, 'Set your goal'),
-    h('p', { class: 'muted' }, 'Tell the app your body stats and goal (bulk, lean bulk, recomp or cut) and it will calculate calories and protein, and build a meal plan for you.'),
-    h('button', { class: 'btn primary wide', onclick: editProfile }, 'Set up my targets')) : null;
-
-  const meals = Object.entries(MEALS).map(([k, label]) => {
+  const meals = MEALS.map((k) => {
+    const label = t(`meal.${k}`);
     const list = entries.filter((e) => e.meal === k).sort((a, b) => a.ts - b.ts);
     const mt = totals(list);
     return h('article', { class: 'card meal' },
-      h('div', { class: 'tracker-head' }, h('h2', {}, label), h('span', { class: 'muted small' }, list.length ? `${k0.format(mt.kcal)} kcal · ${k0.format(mt.p)} g protein` : ''),
-        h('button', { class: 'icon-btn small add', 'aria-label': `Add to ${label}`, onclick: () => searchFlow(k) }, '+')),
+      h('div', { class: 'tracker-head' }, h('h2', {}, label), h('span', { class: 'muted small' }, list.length ? t('food.kcalProtein', { kcal: fmt(mt.kcal), p: fmt(mt.p) }) : ''),
+        h('button', { class: 'icon-btn small add', 'aria-label': t('search.addTo', { meal: label }), onclick: () => searchFlow(k) }, icon('plus'))),
       list.length ? h('ul', { class: 'entries' }, ...list.map((e) => {
         const n = scale(e.n, e.grams);
         return h('li', {}, h('button', { class: 'entry', onclick: () => editEntry(e) },
-          h('span', { class: 'grow' }, e.name, h('span', { class: 'muted small' }, ` · ${k0.format(e.grams)} g`)),
-          h('span', { class: 'small' }, `${k0.format(n.kcal)} kcal`)));
+          h('span', { class: 'grow' }, foodName(e), h('span', { class: 'muted small' }, ` · ${fmt(e.grams)} ${t('unit.g')}`)),
+          h('span', { class: 'small' }, t('food.kcalN', { n: fmt(n.kcal) }))));
       })) : null);
   });
 
   let sug = null;
-  if (t && foodDay === today) {
-    const rem = { kcal: t.kcal - tot.kcal, p: t.protein - tot.p };
+  if (tg && foodDay === today) {
+    const rem = { kcal: tg.kcal - tot.kcal, p: tg.protein - tot.p };
     const list = suggestions(rem, p.diet === 'vegetarian');
     if (list.length) {
       sug = h('article', { class: 'card' },
-        h('h2', {}, `${k0.format(rem.p)} g protein to go`),
-        h('p', { class: 'muted small' }, 'Tap to add one of these:'),
+        h('h2', {}, t('food.proteinToGo', { n: fmt(rem.p) })),
+        h('p', { class: 'muted small' }, t('food.tapToAdd')),
         h('ul', { class: 'entries' }, ...list.map((s) => h('li', {}, h('button', { class: 'entry', onclick: () => pickAndLog(s.f) },
-          h('span', { class: 'grow' }, s.f.name, h('span', { class: 'muted small' }, ` · ${s.grams} g`)),
-          h('span', { class: 'small' }, `+${k0.format(s.n.p)} g P · ${k0.format(s.n.kcal)} kcal`))))));
+          h('span', { class: 'grow' }, foodName(s.f), h('span', { class: 'muted small' }, ` · ${fmt(s.grams)} ${t('unit.g')}`)),
+          h('span', { class: 'small' }, t('food.plusP', { p: fmt(s.n.p), kcal: fmt(s.n.kcal) })))))));
     }
   }
-
-  return [nav, setup, t ? summaryCard(t, tot) : h('article', { class: 'card' }, h('div', { class: 'big' }, `${k0.format(tot.kcal)} kcal`), h('p', { class: 'muted small' }, macroLine(tot))), actions, ...meals, sug];
+  return [nav, tg ? summaryCard(tg, tot) : h('article', { class: 'card' }, h('div', { class: 'big' }, t('food.kcalN', { n: fmt(tot.kcal) })), h('p', { class: 'muted small' }, macroLine(tot))), actions, ...meals, sug];
 }
 
-const TIPS = {
-  bulk: [
-    'Eat in a steady surplus: aim to gain about 0.5–0.75% of body weight per week. Faster than that is mostly fat.',
-    'Spread protein over 3–5 meals of roughly 0.4 g/kg each (e.g. 25–45 g).',
-    'Train each muscle about twice a week and add weight or reps over time (progressive overload). Food builds muscle only with a training stimulus.',
-    'Struggling to eat enough? Use liquid calories (milk, smoothies), nuts, oils and bigger carb portions around training.',
-  ],
-  lean: [
-    'Aim to gain about 0.25–0.5% of body weight per week. Slower gain keeps fat low and still builds muscle well.',
-    'Keep protein high (≈2 g/kg) and spread it across the day.',
-    'Progressive overload is the main driver: log your lifts and beat them gradually.',
-    'Sleep 7–9 hours. Poor sleep blunts muscle gain and raises hunger.',
-  ],
-  recomp: [
-    'Eat at maintenance with high protein (≈2.2 g/kg). Works best for beginners or after a break.',
-    'Expect the scale to barely move. Judge progress by strength, photos and waist measurements.',
-    'Keep training hard and consistent; recomposition is slow but real.',
-  ],
-  cut: [
-    'Lose about 0.5–1% of body weight per week to keep muscle.',
-    'Keep protein high (≈2.2 g/kg) and keep lifting heavy to signal your body to keep muscle.',
-    'Fill up on vegetables, fruit and lean protein; they’re very filling for few calories.',
-  ],
-};
-
-function viewPlan() {
-  const p = F().profile;
-  if (!p) return [h('h1', {}, 'Plan'), h('article', { class: 'card callout' }, h('p', {}, 'Set your goal first, then you’ll get a meal plan sized to your targets.'), h('button', { class: 'btn primary wide', onclick: editProfile }, 'Set up my targets'))];
-  const t = targets(p);
-  const plan = buildPlan(p.diet, t);
-  return [
-    h('h1', {}, 'Your plan'),
-    h('article', { class: 'card' },
-      h('h2', {}, GOALS[p.goal].label),
-      h('div', { class: 'stats four' },
-        h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, k0.format(t.kcal)), h('div', { class: 'stat-l' }, 'kcal / day')),
-        h('div', { class: 'stat m-p' }, h('div', { class: 'stat-v' }, `${t.protein} g`), h('div', { class: 'stat-l' }, 'protein')),
-        h('div', { class: 'stat m-c' }, h('div', { class: 'stat-v' }, `${t.carbs} g`), h('div', { class: 'stat-l' }, 'carbs')),
-        h('div', { class: 'stat m-f' }, h('div', { class: 'stat-v' }, `${t.fat} g`), h('div', { class: 'stat-l' }, 'fat'))),
-      h('p', { class: 'muted small' }, `How: your body burns about ${k0.format(t.bmr)} kcal at rest (Mifflin–St Jeor) and about ${k0.format(t.tdee)} with your activity. `,
-        `${p.goal === 'bulk' || p.goal === 'lean' ? 'A small surplus' : p.goal === 'cut' ? 'A moderate deficit' : 'Maintenance calories'} gives ${k0.format(t.kcal)}. Protein is ${GOALS[p.goal].protein} g per kg of body weight, fat at least 25% of calories, and carbs fill the rest to fuel training.`)),
-    h('article', { class: 'card' },
-      h('h2', {}, 'A sample day that hits your targets'),
-      h('p', { class: 'muted small' }, `${macroLine(plan.n)}. Portions are cooked weights. Swap foods freely; the totals are what matter.`),
-      ...plan.meals.map((m) => h('div', { class: 'plan-meal' },
-        h('div', { class: 'row' }, h('h3', { class: 'grow' }, m.name), h('span', { class: 'muted small' }, `${k0.format(m.n.kcal)} kcal · ${k0.format(m.n.p)} g P`)),
-        h('ul', { class: 'entries' }, ...m.rows.map((r) => h('li', {}, h('span', { class: 'grow' }, r.f.name), h('span', { class: 'small' }, `${r.grams} g`)))),
-        h('button', {
-          class: 'link small',
-          onclick: async () => {
-            foodDay = dayKey();
-            const meal = { Breakfast: 'breakfast', Lunch: 'lunch', Dinner: 'dinner' }[m.name] || 'snack';
-            for (const r of m.rows) F().log.push({ ...cleanFood(r.f), id: uid(), day: foodDay, ts: Date.now(), grams: r.grams, meal });
-            await ctx.commit();
-            toast(`${m.name} logged for today`);
-          },
-        }, `Log this ${m.name.toLowerCase()} today`)))),
-    h('article', { class: 'card' },
-      h('h2', {}, 'How to make it work'),
-      h('ul', { class: 'bullets' }, ...TIPS[p.goal].map((x) => h('li', {}, x))),
-      h('p', { class: 'muted small' }, 'Evidence-based general guidance for healthy adults, not medical advice. If you’re under 18, pregnant, have a medical condition or a history of disordered eating, check with a doctor or dietitian first.')),
-  ];
-}
+const TIP_COUNT = { bulk: 4, lean: 4, recomp: 3, cut: 3 };
+const PLAN_MEAL = { Breakfast: 'breakfast', Lunch: 'lunch', Dinner: 'dinner', Snack: 'snack' };
 
 function viewGoal() {
   const p = F().profile;
-  if (!p) return [h('h1', {}, 'Progress'), h('article', { class: 'card callout' }, h('button', { class: 'btn primary wide', onclick: editProfile }, 'Set up my targets'))];
-  const t = targets(p);
+  const tg = targets(p);
   const days = dayRange(dayKey(), 14);
   const daily = days.map((d) => { const l = dayLog(d); return l.length ? totals(l) : null; });
-  const out = [h('h1', {}, 'Progress')];
+  const out = [];
 
   // Weight trend vs goal rate
   const wt = weightTracker();
-  let check = h('p', { class: 'muted' }, 'Log your weight (Today tab → Weight) a few mornings a week. After two weeks you’ll see if you’re gaining at the right speed.');
+  let check = h('p', { class: 'muted' }, t('goal.logWeight'));
   if (wt) {
     const w = series(ctx.state, wt, dayRange(dayKey(), 14)).map((v) => (v === null ? null : wt.unit === 'lb' ? v * LB : v));
     const a = w.slice(0, 7).filter((v) => v !== null); const b = w.slice(7).filter((v) => v !== null);
@@ -1109,115 +1099,154 @@ function viewGoal() {
       const pct = ((avgB - avgA) / avgA) * 100;
       const [lo, hi] = GOALS[p.goal].weekly;
       const kgWeek = avgB - avgA;
-      const shown = wt.unit === 'lb' ? `${k1.format(kgWeek / LB)} lb` : `${k1.format(kgWeek)} kg`;
+      const shown = wt.unit === 'lb' ? `${fmt(kgWeek / LB, 1)} ${t('unit.lb')}` : `${fmt(kgWeek, 1)} ${t('unit.kg')}`;
       const adj = Math.round((Math.abs(pct < lo ? lo - pct : pct - hi) / 100) * avgB * 7700 / 7 / 50) * 50; // ≈7700 kcal per kg
-      check = h('div', {},
-        h('div', { class: 'big' }, `${pct >= 0 ? '+' : ''}${k1.format(pct)}% / week`),
-        h('p', { class: 'muted small' }, `${pct >= 0 ? '+' : ''}${shown} this week (7-day average vs the week before). Target: ${lo}% to ${hi}% per week.`),
+      check = h('div', { class: 'stack' },
+        h('div', { class: 'big' }, `${pct >= 0 ? '+' : ''}${fmt(pct, 1)}% ${t('goal.perWeek')}`),
+        h('p', { class: 'muted small' }, t('goal.thisWeek', { v: `${pct >= 0 ? '+' : ''}${shown}`, lo, hi })),
         h('p', { class: pct < lo || pct > hi ? 'warn' : 'ok' },
-          pct < lo ? `Below target. Add about ${Math.max(100, adj)} kcal a day and check again next week.`
-            : pct > hi ? `Faster than ideal. Trim about ${Math.max(100, adj)} kcal a day to keep it lean.`
-              : '✓ Right on target. Keep going.'));
+          pct < lo ? t('goal.below', { n: fmt(Math.max(100, adj)) }) : pct > hi ? t('goal.above', { n: fmt(Math.max(100, adj)) }) : t('goal.onTarget')));
     }
   }
-  out.push(h('article', { class: 'card' }, h('h2', {}, 'Am I on track?'), check));
+  out.push(h('article', { class: 'card' }, h('h2', {}, t('goal.onTrack')), check));
 
   if (daily.some(Boolean)) {
     const logged = daily.filter(Boolean);
     const avg = sum(logged); const n = logged.length;
-    out.push(h('article', { class: 'card', css: { '--c': '#c08a1e' } },
-      h('h2', {}, 'Calories, last 14 days'),
-      h('p', { class: 'muted small' }, `Average ${k0.format(avg.kcal / n)} of ${k0.format(t.kcal)} kcal on ${n} logged days.`),
-      barChart({ days, values: daily.map((x) => x && x.kcal), color: '#c08a1e', goal: t.kcal, label: 'Calories per day' })));
     out.push(h('article', { class: 'card' },
-      h('h2', {}, 'Protein, last 14 days'),
-      h('p', { class: 'muted small' }, `Average ${k0.format(avg.p / n)} of ${t.protein} g. Hit on ${daily.filter((x) => x && x.p >= t.protein * 0.95).length} days.`),
-      barChart({ days, values: daily.map((x) => x && x.p), color: '#b5523b', goal: t.protein, label: 'Protein per day' })));
+      h('h2', {}, t('goal.kcal14')),
+      h('p', { class: 'muted small' }, t('goal.avgKcal', { avg: fmt(avg.kcal / n), target: fmt(tg.kcal), n: fmt(n) })),
+      barChart({ days, values: daily.map((x) => x && x.kcal), color: '#F2B544', goal: tg.kcal, label: t('goal.kcalPerDay') })));
+    out.push(h('article', { class: 'card' },
+      h('h2', {}, t('goal.protein14')),
+      h('p', { class: 'muted small' }, t('goal.avgProtein', { avg: fmt(avg.p / n), target: fmt(tg.protein), hit: fmt(daily.filter((x) => x && x.p >= tg.protein * 0.95).length) })),
+      barChart({ days, values: daily.map((x) => x && x.p), color: '#6CB4FF', goal: tg.protein, label: t('goal.proteinPerDay') })));
   }
+
+  // How the targets are calculated, a sample day and the evidence-based tips (from v1.7's Plan tab)
+  const plan = buildPlan(p.diet, tg);
+  out.push(h('article', { class: 'card' },
+    h('h2', {}, t(`goal.${p.goal}`)),
+    h('div', { class: 'stats four' },
+      h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, fmt(tg.kcal)), h('div', { class: 'stat-l' }, t('goal.kcalDay'))),
+      h('div', { class: 'stat m-p' }, h('div', { class: 'stat-v' }, `${fmt(tg.protein)} ${t('unit.g')}`), h('div', { class: 'stat-l' }, t('macro.protein'))),
+      h('div', { class: 'stat m-c' }, h('div', { class: 'stat-v' }, `${fmt(tg.carbs)} ${t('unit.g')}`), h('div', { class: 'stat-l' }, t('macro.carbs'))),
+      h('div', { class: 'stat m-f' }, h('div', { class: 'stat-v' }, `${fmt(tg.fat)} ${t('unit.g')}`), h('div', { class: 'stat-l' }, t('macro.fat')))),
+    h('p', { class: 'muted small' }, t('goal.how', { bmr: fmt(tg.bmr), tdee: fmt(tg.tdee), kcal: fmt(tg.kcal), protein: GOALS[p.goal].protein, kind: t(p.goal === 'bulk' || p.goal === 'lean' ? 'goal.surplus' : p.goal === 'cut' ? 'goal.deficit' : 'goal.maintenance') })),
+    h('p', { class: 'muted small' }, t('goal.mealPlanNote'))),
+  h('details', { class: 'card' },
+    h('summary', { class: 'h2like' }, h('h2', {}, t('goal.sampleDay'))),
+    h('p', { class: 'muted small' }, t('goal.sampleHint', { line: macroLine(plan.n) })),
+    ...plan.meals.map((m) => h('div', { class: 'plan-meal' },
+      h('div', { class: 'row' }, h('h3', { class: 'grow' }, t(`meal.${PLAN_MEAL[m.name] || 'snack'}`)), h('span', { class: 'muted small' }, t('food.kcalProtein', { kcal: fmt(m.n.kcal), p: fmt(m.n.p) }))),
+      h('ul', { class: 'entries' }, ...m.rows.map((r) => h('li', {}, h('span', { class: 'grow' }, foodName(r.f)), h('span', { class: 'small' }, `${fmt(r.grams)} ${t('unit.g')}`))))))),
+  h('article', { class: 'card' },
+    h('h2', {}, t('goal.tipsTitle')),
+    h('ul', { class: 'bullets' }, ...Array.from({ length: TIP_COUNT[p.goal] }, (_, i) => h('li', {}, t(`tip.${p.goal}.${i + 1}`)))),
+    h('p', { class: 'muted small' }, t('goal.disclaimer'))));
 
   const kg = p.weightKg;
   out.push(h('article', { class: 'card' },
-    h('h2', {}, 'Your details'),
-    h('p', { class: 'muted small' }, `${p.sex === 'female' ? 'Female' : 'Male'}, ${p.age} · `,
-      p.units === 'imperial' ? `${Math.floor(p.heightCm / 30.48)}′${Math.round((p.heightCm / 2.54) % 12)}″ · ${k0.format(kg / LB)} lb` : `${k0.format(p.heightCm)} cm · ${k1.format(kg)} kg`,
-      ` · ${ACTIVITY[p.activity]} · ${GOALS[p.goal].label}`),
-    h('button', { class: 'btn ghost wide', onclick: editProfile }, 'Update weight, goal or details')));
+    h('h2', {}, t('goal.details')),
+    h('p', { class: 'muted small' }, `${t(p.sex === 'female' ? 'prof.female' : 'prof.male')}, ${fmt(p.age)} · `,
+      p.units === 'imperial' ? `${Math.floor(p.heightCm / 30.48)}′${Math.round((p.heightCm / 2.54) % 12)}″ · ${fmt(kg / LB)} ${t('unit.lb')}` : `${fmt(p.heightCm)} ${t('prof.cm')} · ${fmt(kg, 1)} ${t('unit.kg')}`,
+      ` · ${t(`act.${p.activity}`)} · ${t(`goal.${p.goal}`)}`),
+    h('button', { class: 'btn ghost wide', onclick: editProfile }, t('goal.update'))));
   return out;
 }
 
+/** What meals.js needs from this module (no circular imports). */
+const api = () => ({
+  ctx, F, addEntry, portionDialog, foodName, pickPhoto, busy, setSub: (s) => { sub = s; ctx.render(); window.scrollTo(0, 0); }, weightsKg,
+});
+
 export function viewFood(c) {
   ctx = c;
-  const seg = h('div', { class: 'chips seg seg3', role: 'tablist' }, ...[['diary', 'Diary'], ['plan', 'Plan'], ['goal', 'Progress']].map(([k, l]) => h('button', {
-    class: `chip${k === sub ? ' on' : ''}`, role: 'tab', 'aria-selected': String(k === sub), onclick: () => { sub = k; ctx.render(); },
+  setCustomRecipes(F().myRecipes);
+  const tabs = [['meals', t('food.tab.meals')], ['diary', t('food.tab.diary')], ['recipes', t('food.tab.recipes')], ['goal', t('food.tab.progress')]];
+  const active = sub === 'recipe' ? 'recipes' : sub;
+  const seg = h('div', { class: 'chips seg', role: 'tablist' }, ...tabs.map(([k, l]) => h('button', {
+    class: `chip${k === active ? ' on' : ''}`, role: 'tab', 'aria-selected': String(k === active), onclick: () => { sub = k; ctx.render(); },
   }, l)));
-  const body = sub === 'plan' ? viewPlan() : sub === 'goal' ? viewGoal() : viewDiary();
+  let body;
+  if (sub === 'meals') body = viewMeals(api());
+  else if (sub === 'recipes' || sub === 'recipe') body = viewRecipes(api());
+  else if (sub === 'goal') body = [h('header', { class: 'page-head' }, h('h1', {}, t('food.tab.progress')), langToggle(ctx.render)), ...viewGoal()];
+  else body = viewDiary();
   return h('section', { class: 'food' }, seg, ...body);
 }
 
-export function resetFoodView() { foodDay = dayKey(); }
+export function resetFoodView() { foodDay = dayKey(); if (sub === 'recipe') sub = 'recipes'; }
+
+/** Settings card for meals and the meal plan. */
+export function mealSettingsCard(c) { ctx = c; return mealSettings(api(), editProfile); }
+
+/** Pre-load the starter recipe photos (built into the Android app) once, encrypted like any photo. */
+export function importStarterPhotos(c) { ctx = c; return importStarters(api()); }
 
 /** Settings card for online lookups. */
 export function foodSettingsCard(c) {
   ctx = c;
-  const key = h('input', { value: F().usdaKey, placeholder: 'Optional: your free USDA API key', maxlength: 64, autocomplete: 'off', 'aria-label': 'USDA API key' });
+  const key = h('input', { value: F().usdaKey, placeholder: t('fs.usdaPh'), maxlength: 64, autocomplete: 'off', 'aria-label': t('fs.usdaKey'), dir: 'ltr' });
   return h('article', { class: 'card' },
-    h('h2', {}, 'Food lookups'),
-    globalThis.POCKET_STATS_HOSTED ? h('p', { class: 'muted small' }, 'Online lookups are switched off in the web-link version. Built-in foods (including Moroccan dishes), saved foods and label entry all work. Use the downloaded app for USDA and Open Food Facts lookups.') : null,
+    h('h2', {}, t('fs.title')),
+    globalThis.POCKET_STATS_HOSTED ? h('p', { class: 'muted small' }, t('fs.hosted')) : null,
     globalThis.POCKET_STATS_HOSTED ? null : h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Look up foods online', h('span', { class: 'muted small block' }, 'Sends only a barcode or search words to USDA and Open Food Facts. Off = built-in and saved foods only.')),
+      h('span', { class: 'grow' }, t('fs.online'), h('span', { class: 'muted small block' }, t('fs.onlineSub'))),
       h('input', { type: 'checkbox', role: 'switch', checked: F().online, onchange: async (e) => { F().online = e.target.checked; await ctx.commit(); } })),
-    ...(globalThis.POCKET_STATS_HOSTED ? [] : [h('label', { class: 'field' }, h('span', {}, 'USDA API key'), key),
-    h('p', { class: 'muted small' }, 'Without a key, USDA allows a limited number of searches per hour. A free key from api.data.gov raises that limit.'),
-    h('button', {
-      class: 'btn ghost', onclick: async () => {
-        const v = key.value.trim();
-        if (!/^[A-Za-z0-9]{0,64}$/.test(v)) { toast("That key doesn't look right."); return; }
-        F().usdaKey = v; await ctx.commit(); toast('Saved');
-      },
-    }, 'Save key')]),
-    h('h3', {}, 'Foods you’ve taught the scanner'),
+    ...(globalThis.POCKET_STATS_HOSTED ? [] : [h('label', { class: 'field' }, h('span', {}, t('fs.usdaKey')), key),
+      h('p', { class: 'muted small' }, t('fs.usdaHelp')),
+      h('button', {
+        class: 'btn ghost', onclick: async () => {
+          const v = key.value.trim();
+          if (!/^[A-Za-z0-9]{0,64}$/.test(v)) { toast(t('fs.keyBad')); return; }
+          F().usdaKey = v; await ctx.commit(); toast(t('saved'));
+        },
+      }, t('fs.saveKey'))]),
+    h('h3', {}, t('fs.taught')),
     Object.keys(F().scans).length ? h('ul', { class: 'entries' }, ...Object.entries(F().scans).sort((a, b) => b[1].updated - a[1].updated).map(([id, rec]) => h('li', {},
       foodThumb(rec.food, { userPhoto: F().myPhotos[id] }),
-      h('span', { class: 'grow' }, rec.food.name, h('span', { class: 'muted small block' }, `${rec.prints.length} views${rec.sizes?.length ? ` · ${rec.sizes.length} portion${rec.sizes.length > 1 ? 's' : ''} learned` : ''}${rec.lastGrams ? ` · usually ${k0.format(rec.lastGrams)} g` : ''}`)),
+      h('span', { class: 'grow' }, foodName(rec.food), h('span', { class: 'muted small block' },
+        [tn('fs.views', rec.prints.length), rec.sizes?.length ? tn('fs.portions', rec.sizes.length) : '', rec.lastGrams ? t('fs.usually', { g: fmt(rec.lastGrams) }) : ''].filter(Boolean).join(' · '))),
       h('button', {
-        class: 'icon-btn small', 'aria-label': `Forget ${rec.food.name}`, onclick: async () => {
-          if (!await confirmDialog(`Forget ${rec.food.name}?`, 'The scanner will no longer recognise it. Your diary is not affected.', 'Forget', true)) return;
+        class: 'icon-btn small', 'aria-label': t('fs.forgetN', { name: foodName(rec.food) }), onclick: async () => {
+          if (!await confirmDialog(t('fs.forgetQ', { name: foodName(rec.food) }), t('fs.forgetBody'), t('fs.forget'), true)) return;
           delete F().scans[id]; await ctx.deleteScan(id); ctx.render();
         },
-      }, '✕'))))
-      : h('p', { class: 'muted small' }, 'None yet. Use “Scan & teach” in Food: scan a food, link it to its name, and next time the app recognises it on its own. Fingerprints stay on this phone, encrypted with your passcode.'),
-    h('h3', {}, 'Photo recognition (Claude)'),
+      }, icon('close', 'icon-sm')))))
+      : h('p', { class: 'muted small' }, t('fs.noneTaught')),
+    h('h3', {}, t('fs.claudeTitle')),
     h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Recognise food from photos', h('span', { class: 'muted small block' },
-        recognitionMode() === 'sample' ? 'Sends the photo you take to Claude through your claude.ai account. Nothing else is sent.' : 'Sends the photo you take to Anthropic with your API key. Nothing else is sent. A few US cents per photo.')),
+      h('span', { class: 'grow' }, t('fs.claude'), h('span', { class: 'muted small block' }, recognitionMode() === 'sample' ? t('fs.claudeHosted') : t('fs.claudeApi'))),
       h('input', { type: 'checkbox', role: 'switch', checked: F().ai, onchange: async (e) => { if (e.target.checked) { if (!await ensureAi()) e.target.checked = false; } else { F().ai = false; await ctx.save(); } } })),
     recognitionMode() === 'api' && F().aiKey ? h('button', {
       class: 'btn ghost', onclick: async () => {
-        if (!await confirmDialog('Remove API key?', 'Photo recognition turns off until you add a key again.', 'Remove', true)) return;
+        if (!await confirmDialog(t('fs.removeKeyQ'), t('fs.removeKeyBody'), t('remove'), true)) return;
         F().aiKey = ''; F().ai = false; await ctx.commit();
       },
-    }, 'Remove API key') : null,
-    h('h3', {}, 'Moroccan food database'),
+    }, t('fs.removeKey')) : null,
+    h('h3', {}, t('fs.dbTitle')),
     h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Use the Moroccan food list', h('span', { class: 'muted small block' }, DATA_BUILT_IN ? 'Supermarket products plus souk, street and home foods. Built into the app: works offline and contacts no server.' : 'Supermarket products plus souk, street and home foods. Downloaded from the app’s data server about once a day when it changed; it holds no personal data and nothing about you is sent.')),
+      h('span', { class: 'grow' }, t('fs.db'), h('span', { class: 'muted small block' }, DATA_BUILT_IN ? t('fs.dbBuiltIn') : t('fs.dbServer'))),
       h('input', { type: 'checkbox', role: 'switch', checked: F().moroccoDb, onchange: async (e) => { F().moroccoDb = e.target.checked; await ctx.commit(); if (e.target.checked) loadFoodDb().catch(() => {}); } })),
     photosAvailable() ? h('label', { class: 'switch-row' },
-      h('span', { class: 'grow' }, 'Show product photos', h('span', { class: 'muted small block' }, DATA_BUILT_IN ? 'Built into the app.' : 'Each photo downloads the first time you see it, then stays on your phone.')),
+      h('span', { class: 'grow' }, t('fs.photos'), h('span', { class: 'muted small block' }, DATA_BUILT_IN ? t('fs.photosBuiltIn') : t('fs.photosServer'))),
       h('input', { type: 'checkbox', role: 'switch', checked: F().photos, onchange: async (e) => { F().photos = e.target.checked; await ctx.commit(); } })) : null,
     F().moroccoDb ? h('p', { class: 'muted small' }, foodDb().length
-      ? `${foodDb().length.toLocaleString()} foods · list from ${foodDbMeta().version || '?'}${DATA_BUILT_IN ? ' · built into this version of the app' : ` · checked ${new Date(foodDbMeta().fetched).toLocaleDateString()}`}`
-      : 'Not downloaded yet.') : null,
+      ? `${tn('browse.nFoods', foodDb().length)} · ${t('fs.listFrom', { v: foodDbMeta().version || '?' })}${DATA_BUILT_IN ? ` · ${t('fs.builtIn')}` : ` · ${t('fs.checked', { d: dateText(new Date(foodDbMeta().fetched), { day: 'numeric', month: 'short' }) })}`}`
+      : t('fs.notDownloaded')) : null,
     F().moroccoDb && !DATA_BUILT_IN ? h('button', {
       class: 'btn ghost', onclick: async () => {
-        toast('Updating food list…');
-        try { const n = await loadFoodDb({ force: true }); toast(`Food list updated: ${n.toLocaleString()} foods`); ctx.render(); } catch { toast("Couldn't reach the data server. Try again later."); }
+        toast(t('fs.updating'));
+        try { const n = await loadFoodDb({ force: true }); toast(t('fs.updated', { n: fmt(n) })); ctx.render(); } catch { toast(t('fs.serverFail')); }
       },
-    }, 'Update food list now') : null,
-    h('p', { class: 'muted small' }, `${F().saved.length} saved foods · ${F().log.length} diary entries`),
+    }, t('fs.updateNow')) : null,
+    h('p', { class: 'muted small' }, t('fs.counts', { saved: fmt(F().saved.length), log: fmt(F().log.length) })),
     F().saved.length ? h('button', {
       class: 'btn ghost', onclick: async () => {
-        if (!await confirmDialog('Clear saved foods?', 'Your diary stays. Only the list of remembered products is cleared.', 'Clear', true)) return;
+        if (!await confirmDialog(t('fs.clearQ'), t('fs.clearBody'), t('fs.clear'), true)) return;
         F().saved = []; await ctx.commit();
       },
-    }, 'Clear saved foods') : null);
+    }, t('fs.clearSaved')) : null);
 }
+

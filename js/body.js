@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // 2D anatomical muscle maps (front and back), drawn as SVG. Tap a muscle to select it.
 // Shapes are defined for the figure's right side (viewer's left) and mirrored.
 const NS = 'http://www.w3.org/2000/svg';
@@ -88,7 +89,7 @@ export function bodyMaps({ primary = [], secondary = [], selected = null, onPick
   const wrap = document.createElement('div');
   wrap.className = 'body-maps';
   const opts = { primary, secondary, selected, onPick };
-  wrap.append(figure(FRONT, { ...opts, label: 'Front' }), figure(BACK, { ...opts, label: 'Back' }));
+  wrap.append(figure(FRONT, { ...opts, label: t('body.front') }), figure(BACK, { ...opts, label: t('body.back') }));
   // Friendlier tooltips
   wrap.querySelectorAll('[data-muscle] title').forEach((t) => { t.textContent = names[t.parentNode.dataset.muscle] || t.textContent; });
   return wrap;

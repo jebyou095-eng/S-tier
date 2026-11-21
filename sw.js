@@ -1,6 +1,6 @@
 // Offline support: caches the app's own files. Never touches your data, and leaves the
 // food-database requests alone (they are never cached).
-const CACHE = 'pocket-stats-v6';
+const CACHE = 'pocket-stats-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -24,6 +24,27 @@ const ASSETS = [
   './js/body.js',
   './js/poses.js',
   './js/vendor/zxing.min.js',
+  './js/i18n.js',
+  './js/lang-en.js',
+  './js/lang-ar.js',
+  './js/icons.js',
+  './js/coach.js',
+  './js/exercises-ar.js',
+  './js/recipes.js',
+  './js/mealplan.js',
+  './js/meals.js',
+  './js/photoedit.js',
+  './js/imaging.js',
+  './js/cutout.js',
+  './js/vendor/tf-backend-wasm.min.js',
+  './js/vendor/tfjs-backend-wasm-simd.wasm',
+  './fonts/inter-latin-400-normal.woff2',
+  './fonts/inter-latin-600-normal.woff2',
+  './fonts/inter-latin-700-normal.woff2',
+  './fonts/space-grotesk-latin-700-normal.woff2',
+  './fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2',
+  './fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2',
+  './fonts/ibm-plex-sans-arabic-arabic-700-normal.woff2',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',

@@ -1,4 +1,7 @@
 // Exercise library, muscles, programs and references. All offline.
+// Arabic text lives in exercises-ar.js; use the helpers at the bottom to show the right language.
+import { isAr } from './i18n.js';
+import { MUSCLES_AR, EXERCISES_AR, PROGRAMS_AR, REFERENCES_AR, GROUPS_AR, LEVEL_AR } from './exercises-ar.js';
 // Guidance follows the ACSM resistance-training position stand, NSCA teaching
 // guidelines and the systematic reviews listed in REFERENCES below.
 
@@ -288,6 +291,14 @@ export const PROGRAMS = {
       ['Lower 2', [['deadlift', 3, '4–6'], ['leg-press', 3, '10–12'], ['hip-thrust', 3, '8–12'], ['walking-lunge', 2, '10/leg'], ['calf-raise', 3, '12–20'], ['plank', 3, '30–45 s']]],
     ],
   },
+  ppla: {
+    name: 'Push / Pull / Legs + Arms · 3 days/week', who: 'Your split: 3 evenings a week. Legs day also trains the arms.',
+    days: [
+      ['Push', [['bench-press', 4, '6–10'], ['ohp', 3, '6–10'], ['db-incline-press', 3, '8–12'], ['lateral-raise', 4, '12–20'], ['pushdown', 3, '10–15']]],
+      ['Pull', [['pull-up', 4, '6–10'], ['barbell-row', 3, '6–10'], ['cable-row', 3, '10–12'], ['face-pull', 3, '12–20'], ['hammer-curl', 2, '10–15']]],
+      ['Legs + Arms', [['back-squat', 4, '5–8'], ['rdl', 3, '8–10'], ['leg-press', 3, '10–12'], ['leg-curl', 2, '10–15'], ['calf-raise', 3, '10–15'], ['barbell-curl', 3, '8–12'], ['oh-extension', 3, '10–15']]],
+    ],
+  },
   ppl: {
     name: 'Push / Pull / Legs · 3–6 days/week', who: 'Run it once a week (3 days) or twice (6 days) for maximum muscle growth.',
     days: [
@@ -316,3 +327,20 @@ export const REFERENCES = [
   { short: 'NSCA, 2009', title: 'Youth resistance training: updated position statement', where: 'J Strength Cond Res 2009;23(5 Suppl):S60–S79', note: 'Supervised resistance training is safe and beneficial for children and teens.' },
   { short: 'PAR-Q+', title: 'Physical Activity Readiness Questionnaire for Everyone', where: 'Warburton et al., Health Fit J Can 2011;4(2):3–23', note: 'The standard screening used below to decide if you should see a doctor first.' },
 ].map((r) => ({ ...r, url: `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(r.title)}` }));
+
+// ---------- the right language ----------
+/** Exercise text in the current language: {name, equip, setup, steps, cues, mistakes, safety}. */
+export function exText(ex) {
+  const ar = isAr() && EXERCISES_AR[ex.id];
+  return ar ? { ...ex, ...ar, level: LEVEL_AR[ex.level] || ex.level } : ex;
+}
+export const exName = (id) => (EX_BY_ID[id] ? exText(EX_BY_ID[id]).name : id);
+export const muscleText = (m) => (isAr() && MUSCLES_AR[m] ? MUSCLES_AR[m] : MUSCLES[m]);
+export const groupName = (g) => (isAr() ? GROUPS_AR[g] || g : g);
+export const programName = (k) => (isAr() && PROGRAMS_AR[k] ? PROGRAMS_AR[k].name : PROGRAMS[k]?.name || k);
+export const programWho = (k) => (isAr() && PROGRAMS_AR[k] ? PROGRAMS_AR[k].who : PROGRAMS[k]?.who || '');
+const DAY_AR = {};
+for (const [k, p] of Object.entries(PROGRAMS)) p.days.forEach(([n], i) => { DAY_AR[n] = PROGRAMS_AR[k]?.days[i] || n; });
+/** A program day's name ("Push", "Day A", …) in the current language. */
+export const dayName = (n) => (isAr() ? DAY_AR[n] || n : n);
+export const refText = (r) => (isAr() && REFERENCES_AR[r.short] ? { ...r, ...REFERENCES_AR[r.short], en: true } : r);

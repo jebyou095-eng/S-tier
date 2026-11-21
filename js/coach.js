@@ -1,6 +1,7 @@
 // Adaptive coach: learns how you actually train from your own logs and adapts the plan.
 // Pure functions (no screen code), so every rule is easy to test. Runs on the phone only.
-import { EX_BY_ID, PROGRAMS } from './exercises.js';
+import { EX_BY_ID, PROGRAMS, exName, dayName, programName } from './exercises.js';
+import { t, fmt, sep } from './i18n.js';
 import { dayKey, addDays, parseDay } from './stats.js';
 
 const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -100,7 +101,7 @@ export function nextDay(gym, prog, a, today = dayKey()) {
   const i = +last.pday.split(':')[1];
   if (last.day === today) return { idx: i, reason: null };
   if (gym.adapt?.on !== false && gym.adapt?.repeat !== false && last.completion < 0.5 && last.sets.length) {
-    return { idx: i, reason: `You did ${Math.round(last.completion * 100)}% of ${prog.days[i][0]} last time, so it’s on again today.` };
+    return { idx: i, reason: t('coach.repeat', { pct: fmt(last.completion * 100), day: dayName(prog.days[i][0]) }) };
   }
   return { idx: (i + 1) % prog.days.length, reason: null };
 }
@@ -120,26 +121,26 @@ export function adaptPlan(gym, idx, a) {
   // 1. Your swaps and removals
   for (const it of items) {
     const to = ad.swaps?.[it.id];
-    if (to && EX_BY_ID[to]) { it.notes.push(`instead of ${EX_BY_ID[it.id].name}`); it.id = to; }
+    if (to && EX_BY_ID[to]) { it.notes.push(t('coach.insteadOf', { name: exName(it.id) })); it.id = to; }
   }
   const removed = items.filter((x) => ad.removed?.includes(x.from));
   if (removed.length) {
     items = items.filter((x) => !ad.removed.includes(x.from));
-    changes.push({ key: 'removed', text: `Left out: ${removed.map((x) => EX_BY_ID[x.from].name).join(', ')} (you chose this).` });
+    changes.push({ key: 'removed', text: t('coach.leftOut', { list: removed.map((x) => exName(x.from)).join(sep()) }) });
   }
   // 2. Back after a break: one set fewer per exercise, lighter weights
   const welcomeBack = a.daysSinceLast !== null && a.daysSinceLast >= 10;
   if (welcomeBack && !ad.ignore?.welcome) {
-    for (const it of items) if (it.sets > 2) { it.sets -= 1; it.notes.push('1 set fewer: back after a break'); }
-    changes.push({ key: 'welcome', text: `Welcome back! ${a.daysSinceLast} days since your last workout, so today is lighter: one set fewer and about 15% less weight. You’ll be back to normal next time.` });
+    for (const it of items) if (it.sets > 2) { it.sets -= 1; it.notes.push(t('coach.note.break')); }
+    changes.push({ key: 'welcome', text: t('coach.welcome', { n: fmt(a.daysSinceLast) }) });
   }
   // 3. How sessions felt
   const r = a.ratings;
   if (r.length >= 2 && r.slice(-2).every((x) => x === 'too-much') && !ad.ignore?.tooMuch) {
-    for (const it of items) if (!isCompound(it.id) && it.sets > 1) { it.sets -= 1; it.notes.push('1 set fewer: last sessions felt like too much'); }
-    changes.push({ key: 'tooMuch', text: 'Your last two workouts felt like too much, so the extra (isolation) exercises have one set fewer. Recovery is where you grow.' });
+    for (const it of items) if (!isCompound(it.id) && it.sets > 1) { it.sets -= 1; it.notes.push(t('coach.note.tooMuch')); }
+    changes.push({ key: 'tooMuch', text: t('coach.tooMuch') });
   } else if (r.length >= 2 && r.slice(-2).every((x) => x === 'easy') && (a.completionAvg ?? 0) >= 0.9 && !ad.ignore?.easy) {
-    changes.push({ key: 'easy', text: 'Your last workouts felt easy: go a bit heavier today (+2.5 kg on big lifts, +1 kg on small ones) or stop sets closer to failure.' });
+    changes.push({ key: 'easy', text: t('coach.easy') });
   }
   // 4. Fit the time you actually have
   const budget = ad.minutes || (a.completionAvg !== null && a.completionAvg < 0.75 && a.sessions.length >= 3 && a.typicalMinutes ? Math.max(20, Math.round(a.typicalMinutes / 5) * 5) : null);
@@ -153,16 +154,16 @@ export function adaptPlan(gym, idx, a) {
       const iso = items.filter((x) => !isCompound(x.id));
       const big = items.filter((x) => isCompound(x.id));
       const reduce = (x, min, why) => { if (x && x.sets > min) { x.sets -= 1; x.notes.push(why); return true; } return false; };
-      for (const x of iso) if (reduce(x, 2, 'shortened to fit your time')) return true;
+      for (const x of iso) if (reduce(x, 2, t('coach.note.time'))) return true;
       if (iso.length && items.length > 3) { const drop = iso[iso.length - 1]; items = items.filter((y) => y !== drop); trimmed.push(drop); return true; }
-      for (const x of [...big].reverse()) if (reduce(x, 2, 'shortened to fit your time')) return true;
+      for (const x of [...big].reverse()) if (reduce(x, 2, t('coach.note.time'))) return true;
       return false;
     };
     let guard = 30;
     while (total() > budget && guard-- > 0 && step());
-    const why = ad.minutes ? `you set ${ad.minutes} min` : `you usually train about ${budget} min and finished ${Math.round(a.completionAvg * 100)}% of your last 3 workouts`;
+    const why = ad.minutes ? t('coach.why.set', { n: fmt(ad.minutes) }) : t('coach.why.usual', { n: fmt(budget), pct: fmt(a.completionAvg * 100) });
     const now = Math.round(total());
-    changes.push({ key: 'time', text: `Shortened to about ${now} min (${why}): big lifts first${trimmed.length ? `, left out ${trimmed.map((x) => EX_BY_ID[x.id].name).join(', ')}` : ''}, extra sets trimmed. The full plan is about ${before} min.${now > budget + 2 ? ' Your main lifts are kept even if it runs a little over.' : ''}` });
+    changes.push({ key: 'time', text: t('coach.shortened', { now: fmt(now), why, left: trimmed.length ? t('coach.leftOutShort', { list: trimmed.map((x) => exName(x.id)).join(sep()) }) : '', before: fmt(before), over: now > budget + 2 ? t('coach.overNote') : '' }) });
   }
   return { items, changes, minutes: Math.round(total()), budget, welcomeBack: welcomeBack && !ad.ignore?.welcome };
 }
@@ -178,13 +179,13 @@ export function suggestions(gym, a) {
     if (s.planned >= 3 && s.skipped / s.planned >= 0.6 && !ad.removed?.includes(id) && !ad.swaps?.[id] && !ad.dismissed?.includes(`skip:${id}`)) {
       const inPlan = new Set(prog.days.flatMap(([, l]) => l.map(([x]) => x)));
       const alt = (EX_BY_ID[id].alts || []).find((x) => !inPlan.has(x)) || EX_BY_ID[id].alts?.[0];
-      out.push({ key: `skip:${id}`, type: 'skip', id, alt, text: `You skipped ${EX_BY_ID[id].name} in ${s.skipped} of your last ${s.planned} workouts.` });
+      out.push({ key: `skip:${id}`, type: 'skip', id, alt, text: t('coach.skipped', { name: exName(id), n: fmt(s.skipped), of: fmt(s.planned) }) });
     }
   }
   // Program asks for more days than you train
   const want = prog.days.length;
   if (a.perWeek !== null && a.weeksOfData >= 3 && gym.program !== 'fb3' && a.perWeek + 0.75 < Math.min(want, gym.program === 'ppl' ? 3 : want) && !ad.dismissed?.includes('freq')) {
-    out.push({ key: 'freq', type: 'program', to: 'fb3', text: `You’ve trained about ${a.perWeek.toFixed(1)} days a week lately, but ${prog.name.split(' · ')[0]} is built for ${gym.program === 'ppl' ? '3–6' : want}. Full body (2–3 days) would train every muscle twice a week on your schedule.` });
+    out.push({ key: 'freq', type: 'program', to: 'fb3', text: t('coach.freq', { n: fmt(a.perWeek, 1), prog: programName(gym.program).split(' · ')[0], want: gym.program === 'ppl' ? '3–6' : fmt(want) }) });
   }
   return out;
 }
@@ -192,19 +193,20 @@ export function suggestions(gym, a) {
 /** Tip for one exercise: progression, deload after repeated misses, or lighter after a break. */
 export function loadTip(ex, reps, history, { welcomeBack = false, lb = false } = {}) {
   const prior = history; // sessions for this exercise, newest first, excluding today
-  if (!prior.length) return 'First time: pick a weight you could lift for 2–3 more reps than the target. Focus on form.';
-  if (welcomeBack) return 'Back after a break: use about 15% less weight than last time and focus on clean reps.';
+  if (!prior.length) return t('tip.first');
+  if (welcomeBack) return t('tip.back');
   const m = String(reps).match(/(\d+)\s*[–-]\s*(\d+)/);
   const range = m ? [+m[1], +m[2]] : null;
   const top = (s) => { const w = Math.max(...s.sets.map((x) => x.kg)); return s.sets.filter((x) => x.kg === w); };
   if (range && prior.length >= 2 && prior.slice(0, 2).every((s) => top(s).some((x) => x.reps < range[0]))) {
-    return `Two sessions in a row below ${range[0]} reps: drop the weight by about 10% today and build back up. That’s normal and gets you moving again.`;
+    return t('tip.deload', { n: fmt(range[0]) });
   }
   const last = top(prior[0]);
   if (range && last[0]?.kg > 0 && last.every((x) => x.reps >= range[1])) {
-    const inc = ex.kind === 'compound' && ['Legs', 'Back'].includes(ex.group) ? (lb ? '5–10 lb' : '2.5–5 kg') : (lb ? '2.5–5 lb' : '1–2.5 kg');
-    return `You hit ${range[1]}+ reps on every set last time → add ${inc} today.`;
+    const big = ex.kind === 'compound' && ['Legs', 'Back'].includes(ex.group);
+    const inc = big ? (lb ? `5–10 ${t('unit.lb')}` : `2.5–5 ${t('unit.kg')}`) : (lb ? `2.5–5 ${t('unit.lb')}` : `1–2.5 ${t('unit.kg')}`);
+    return t('tip.add', { n: fmt(range[1]), inc });
   }
-  if (range && last.some((x) => x.reps < range[0])) return 'Last time fell below the rep range. Keep the same weight, or drop 5–10%, and own the form.';
-  return 'Same weight as last time and try to beat it by 1 rep on at least one set.';
+  if (range && last.some((x) => x.reps < range[0])) return t('tip.below');
+  return t('tip.same');
 }

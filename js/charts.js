@@ -1,5 +1,6 @@
 // Tiny dependency-free SVG charts.
 import { parseDay } from './stats.js';
+import { t, fmt as fmtNum, dateText } from './i18n.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -17,8 +18,8 @@ function niceMax(v) {
   return 10 * p;
 }
 
-const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-const shortDate = (k) => parseDay(k).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const fmt = { format: (v) => fmtNum(v, 1) };
+const shortDate = (k) => dateText(parseDay(k), { month: 'short', day: 'numeric' });
 
 /** Daily bar chart. `values` may contain nulls (no bar). */
 export function barChart({ days, values, color, yMax, goal, label }) {
@@ -90,7 +91,7 @@ export function weekdayChart({ values, color, yMax, label }) {
   const max = yMax ?? niceMax(Math.max(...values.filter((v) => v !== null), 0));
   const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': label });
   svg.append(s('line', { x1: 0, x2: W, y1: T + ih, y2: T + ih, class: 'axis' }));
-  ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach((d, i) => {
+  ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((k) => t(`wd.${k}`)).forEach((d, i) => {
     const v = values[i];
     const x = i * step + (step - bw) / 2;
     if (v !== null) {

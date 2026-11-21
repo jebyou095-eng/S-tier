@@ -18,3 +18,4 @@ android/.cache/
 # The Android app is shared directly (not via this repo); build it with android/build.sh
 dist/*.apk
 dist/*.idsig
+private/

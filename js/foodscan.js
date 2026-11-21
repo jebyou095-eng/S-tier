@@ -5,6 +5,7 @@
 // the phone. When you link a scan to a food, its fingerprints are saved; later scans are
 // compared against everything you've taught it. No image ever leaves the phone, and the
 // fingerprints are encrypted with your passcode like the rest of your data.
+import { t } from './i18n.js';
 import { runBundledLib } from './ui.js';
 import { repoFile } from './fooddb.js';
 import { cacheGet, cacheSet } from './db.js';
@@ -46,7 +47,7 @@ async function getModelFiles() {
 export function prepareScanner(onStatus = () => {}) {
   if (model) return Promise.resolve();
   loading ??= (async () => {
-    onStatus('Loading the scanner…');
+    onStatus(t('scan.loading'));
     const tf = await loadTf();
     try { await tf.setBackend('webgl'); } catch { await tf.setBackend('cpu'); }
     await tf.ready();

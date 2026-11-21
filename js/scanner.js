@@ -1,5 +1,7 @@
 // Barcode scanning that runs entirely on the phone. Camera frames are decoded in
 // memory and thrown away; no image is ever saved or sent anywhere.
+import { t } from './i18n.js';
+import { icon } from './icons.js';
 import { h, runBundledLib } from './ui.js';
 
 const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
@@ -132,8 +134,8 @@ export function scanBarcode() {
   return new Promise((resolve) => {
     let stream = null; let running = true; let timer = null;
     const video = h('video', { playsinline: true, muted: true, autoplay: true, class: 'scan-video' });
-    const status = h('p', { class: 'scan-status' }, 'Starting camera…');
-    const manual = h('input', { inputmode: 'numeric', pattern: '[0-9]*', placeholder: 'Type the barcode number', 'aria-label': 'Barcode number', maxlength: 14 });
+    const status = h('p', { class: 'scan-status' }, t('scan.starting'));
+    const manual = h('input', { inputmode: 'numeric', pattern: '[0-9]*', placeholder: t('bc.typeNumber'), 'aria-label': t('bc.number'), maxlength: 14 });
     const photo = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
     const canvas = document.createElement('canvas');
 
@@ -150,9 +152,9 @@ export function scanBarcode() {
     photo.addEventListener('change', async () => {
       const f = photo.files[0];
       if (!f) return;
-      status.textContent = 'Reading photo…';
+      status.textContent = t('bc.reading');
       const code = await decodeImageFile(f).catch(() => null);
-      if (code) { navigator.vibrate?.(60); finish(code); } else status.textContent = 'No barcode found in that photo. Try again closer, or type the number.';
+      if (code) { navigator.vibrate?.(60); finish(code); } else status.textContent = t('bc.notFound');
     });
 
     dlg.append(
@@ -163,12 +165,12 @@ export function scanBarcode() {
           class: 'row', onsubmit: (e) => {
             e.preventDefault();
             const code = manual.value.replace(/\D/g, '');
-            if (validBarcode(code)) finish(code); else status.textContent = "That number doesn't look like a valid barcode. Check the digits.";
+            if (validBarcode(code)) finish(code); else status.textContent = t('bc.invalid');
           },
-        }, manual, h('button', { class: 'btn primary', type: 'submit' }, 'Look up')),
+        }, manual, h('button', { class: 'btn primary', type: 'submit' }, t('bc.lookUp'))),
         h('div', { class: 'row' },
-          h('button', { class: 'btn ghost', type: 'button', onclick: () => photo.click() }, '📷 Take photo instead'),
-          h('button', { class: 'btn ghost', type: 'button', onclick: () => finish(null) }, 'Cancel')),
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => photo.click() }, icon('camera', 'icon-sm'), t('bc.photoInstead')),
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => finish(null) }, t('cancel'))),
         photo),
     );
     document.body.append(dlg);
@@ -179,15 +181,15 @@ export function scanBarcode() {
       try {
         det = await getDetector();
       } catch {
-        status.textContent = 'Scanner unavailable. Take a photo or type the number.';
+        status.textContent = t('bc.unavailable');
         return;
       }
       if (globalThis.POCKET_STATS_HOSTED) {
-        status.textContent = 'Tap "Take photo" and photograph the barcode, or type its number.';
+        status.textContent = t('bc.tapPhoto');
         return;
       }
       if (!navigator.mediaDevices?.getUserMedia) {
-        status.textContent = 'Live camera not available here. Take a photo of the barcode or type the number.';
+        status.textContent = t('bc.noLive');
         return;
       }
       try {
@@ -195,14 +197,15 @@ export function scanBarcode() {
           audio: false,
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         });
-      } catch {
-        status.textContent = 'Camera permission was denied. You can still take a photo or type the number.';
+      } catch (err) {
+        console.warn('camera:', err?.name, err?.message);
+        status.textContent = t('bc.denied');
         return;
       }
       if (!running) { stream.getTracks().forEach((t) => t.stop()); return; }
       video.srcObject = stream;
       await video.play().catch(() => {});
-      status.textContent = 'Point at the barcode. Hold steady.';
+      status.textContent = t('bc.point');
       // Require the same code twice in a row to rule out misreads.
       let last = null;
       const tick = async () => {

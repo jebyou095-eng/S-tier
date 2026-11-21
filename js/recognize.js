@@ -6,6 +6,7 @@
 //   (stored on the phone, encrypted if you set a passcode).
 // - claude.ai web link: sent through your Claude account (the page asks first).
 // Only the photo and the food list below are sent: never your diary or body stats.
+import { t } from './i18n.js';
 import { runBundledLib } from './ui.js';
 
 const MODEL = 'claude-opus-5-5';
@@ -134,29 +135,29 @@ async function viaApi(photo, catalog, apiKey) {
       }],
     });
   } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError) throw new RecognitionError('auth', 'Your API key was not accepted. Check it in Settings.');
-    if (err instanceof Anthropic.PermissionDeniedError) throw new RecognitionError('auth', 'This API key is not allowed to use this model.');
-    if (err instanceof Anthropic.RateLimitError) throw new RecognitionError('rate', 'Too many requests right now. Wait a minute and try again.');
-    if (err instanceof Anthropic.BadRequestError) throw new RecognitionError('bad', `The request was rejected: ${err.message}`);
-    if (err instanceof Anthropic.APIConnectionError) throw new RecognitionError('offline', "Couldn't reach Claude. Check your internet connection.");
-    if (err instanceof Anthropic.APIError) throw new RecognitionError('api', `Claude API error ${err.status ?? ''}. Try again later.`);
+    if (err instanceof Anthropic.AuthenticationError) throw new RecognitionError('auth', t('ai.err.auth'));
+    if (err instanceof Anthropic.PermissionDeniedError) throw new RecognitionError('auth', t('ai.err.perm'));
+    if (err instanceof Anthropic.RateLimitError) throw new RecognitionError('rate', t('ai.err.rate'));
+    if (err instanceof Anthropic.BadRequestError) throw new RecognitionError('bad', t('ai.err.rejected'));
+    if (err instanceof Anthropic.APIConnectionError) throw new RecognitionError('offline', t('ai.err.offline'));
+    if (err instanceof Anthropic.APIError) throw new RecognitionError('api', t('ai.err.api', { status: err.status ?? '' }));
     throw err;
   }
-  if (response.stop_reason === 'refusal') throw new RecognitionError('refusal', 'Claude declined to analyse this photo.');
-  if (response.stop_reason === 'max_tokens') throw new RecognitionError('bad', 'The answer was cut off. Try a photo with fewer items.');
+  if (response.stop_reason === 'refusal') throw new RecognitionError('refusal', t('ai.err.refusal'));
+  if (response.stop_reason === 'max_tokens') throw new RecognitionError('bad', t('ai.err.cut'));
   const text = response.content.find((b) => b.type === 'text')?.text;
-  if (!text) throw new RecognitionError('bad', 'Claude returned no answer.');
+  if (!text) throw new RecognitionError('bad', t('ai.err.empty'));
   try {
     return clean(JSON.parse(text));
   } catch {
-    throw new RecognitionError('bad', "Couldn't read Claude's answer. Try again.");
+    throw new RecognitionError('bad', t('ai.err.unreadable'));
   }
 }
 
 /** claude.ai web-link version: the page's built-in Claude access (asks the viewer first). */
 async function viaSample(photo, catalog) {
   const sample = await globalThis.claude?.use?.('sample');
-  if (!sample) throw new RecognitionError('unavailable', 'Claude is not available in this view.');
+  if (!sample) throw new RecognitionError('unavailable', t('ai.err.unavailable'));
   try {
     const result = await sample.json(
       `${instructions(catalog)}\n\nThe attached image is a photo of food. Answer with JSON only, exactly in this shape:\n${JSON.stringify(SCHEMA)}`,
@@ -165,12 +166,12 @@ async function viaSample(photo, catalog) {
     return clean(result);
   } catch (err) {
     const msg = {
-      not_granted: 'Claude access was not allowed for this page.',
-      rate_limited: 'Too many requests right now. Wait a minute and try again.',
-      images_unavailable: 'This view cannot send images to Claude.',
-      invalid_json: "Couldn't read Claude's answer. Try again.",
+      not_granted: t('ai.err.notGranted'),
+      rate_limited: t('ai.err.rate'),
+      images_unavailable: t('ai.err.noImages'),
+      invalid_json: t('ai.err.unreadable'),
     }[err?.code];
-    throw new RecognitionError(err?.code || 'api', msg || 'Recognition failed. Try again later.');
+    throw new RecognitionError(err?.code || 'api', msg || t('ai.err.failed'));
   }
 }
 

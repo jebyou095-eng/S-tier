@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'data' / 'sources'))
 from market_foods import FOODS as MARKET  # noqa: E402
-from recipes import INGREDIENTS, RECIPES  # noqa: E402
+from recipes import INGREDIENTS, INGREDIENTS_AR, RECIPES  # noqa: E402
 
 CATEGORIES = [  # first match wins: (label, exact OFF category tags without the "en:" prefix)
     ('Water', ['waters', 'mineral-waters', 'spring-waters']),
@@ -191,7 +191,7 @@ def main():
     out = {
         'version': time.strftime('%Y-%m-%d'),
         'where': WHERE,
-        'ingredients': {i: list(INGREDIENTS[i]) for i in used},
+        'ingredients': {i: list(INGREDIENTS[i]) + [INGREDIENTS_AR.get(i, '')] for i in INGREDIENTS},
         'attribution': 'Packaged products and photos: Open Food Facts contributors (ODbL / CC BY-SA). '
                        'Market foods: USDA FoodData Central values or labelled recipe estimates.',
         'foods': foods,

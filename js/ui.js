@@ -1,5 +1,7 @@
 // Shared UI helpers.
 import { dayKey, parseDay, addDays } from './stats.js';
+import { t, lang, setLang, dateText } from './i18n.js';
+import { icon } from './icons.js';
 
 // ---------- tiny DOM helper (never uses innerHTML, so imported data can't inject markup) ----------
 export function h(tag, attrs = {}, ...kids) {
@@ -35,9 +37,15 @@ export const uid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (
 
 export function dayLabel(k) {
   const today = dayKey();
-  if (k === today) return 'Today';
-  if (k === addDays(today, -1)) return 'Yesterday';
-  return parseDay(k).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  if (k === today) return t('day.today');
+  if (k === addDays(today, -1)) return t('day.yesterday');
+  return dateText(parseDay(k), { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+/** "Thursday · 20 Nov" style date line. */
+export function longDate(k) {
+  const d = parseDay(k);
+  return `${dateText(d, { weekday: 'long' })} · ${dateText(d, { day: 'numeric', month: 'short' })}`;
 }
 
 const $toast = document.getElementById('toast');
@@ -48,10 +56,23 @@ export function toast(msg) {
   toast.t = setTimeout(() => { $toast.hidden = true; }, 2600);
 }
 
+/** EN | ع switch: the current language first. */
+export function langToggle(onChange, cls = '') {
+  const ar = lang() === 'ar';
+  return h('button', {
+    type: 'button', class: `lang-toggle ${cls}`, 'aria-label': t('lang.switch'),
+    onclick: () => { setLang(ar ? 'en' : 'ar'); onChange?.(); },
+  }, ar ? 'ع' : 'EN', h('span', { class: 'sep', 'aria-hidden': 'true' }, '|'), h('span', { class: 'off', lang: ar ? 'en' : 'ar' }, ar ? 'EN' : 'ع'));
+}
+
+export function iconButton(name, label, onclick, cls = '') {
+  return h('button', { type: 'button', class: `icon-btn ${cls}`, 'aria-label': label, title: label, onclick }, icon(name));
+}
+
 // ---------- dialogs ----------
-export function modal(build) {
+export function modal(build, cls = 'sheet') {
   return new Promise((resolve) => {
-    const dlg = h('dialog', { class: 'sheet' });
+    const dlg = h('dialog', { class: cls });
     const done = (val) => { dlg.close(); dlg.remove(); resolve(val); };
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
     dlg.append(build(done));
@@ -61,11 +82,11 @@ export function modal(build) {
   });
 }
 
-export function confirmDialog(title, body, okLabel = 'OK', danger = false) {
+export function confirmDialog(title, body, okLabel = t('ok'), danger = false) {
   return modal((done) => h('div', { class: 'sheet-body' },
     h('h2', {}, title),
     body ? h('p', { class: 'muted' }, body) : null,
     h('div', { class: 'row end' },
-      h('button', { class: 'btn ghost', onclick: () => done(false) }, 'Cancel'),
+      h('button', { class: 'btn ghost', onclick: () => done(false) }, t('cancel')),
       h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => done(true) }, okLabel))));
 }

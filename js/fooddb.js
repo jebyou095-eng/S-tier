@@ -5,6 +5,9 @@
 // Product photos load only when shown, then stay cached on the phone.
 // Nothing about you is sent: GitHub only sees that the public list or a photo was requested.
 import { cacheGet, cacheSet } from './db.js';
+import { icon } from './icons.js';
+import { AR } from './lang-ar.js';
+import { EN } from './lang-en.js';
 
 const RAW = 'https://raw.githubusercontent.com/jebyou095-eng/S-tier/'; // build_apk strips this
 const LATEST = 'https://api.github.com/repos/jebyou095-eng/S-tier/commits/HEAD'; // build_apk strips this
@@ -58,7 +61,10 @@ function adopt(json, fetched) {
     hasLabelIngredients: x.hi === 1,
   }));
   ingredientTable = json.ingredients && typeof json.ingredients === 'object' ? json.ingredients : {};
-  for (const f of foods) f.hay = `${f.name} ${f.brand} ${f.alt}`.toLowerCase();
+  // Search finds a food in English, French or Arabic; packaged products also by their category in Arabic
+  const cats = new Map(Object.keys(EN).filter((k) => k.startsWith('cat.')).map((k) => [EN[k], `${EN[k]} ${AR[k] || ''}`]));
+  const catWords = (c) => cats.get(c) || c;
+  for (const f of foods) f.hay = `${f.name} ${f.brand} ${f.alt} ${f.cat ? catWords(f.cat) : ''}`.toLowerCase();
   byCode = new Map(foods.filter((f) => f.code).map((f) => [f.code, f]));
   meta = { version: json.version || null, fetched, attribution: json.attribution || '', where: json.where || {} };
   listeners.forEach((fn) => fn());
@@ -119,8 +125,11 @@ export const repoFile = (path) => `${base()}${path}`;
 export function ingredientInfo(id) {
   const r = ingredientTable[id];
   if (!Array.isArray(r)) return null;
-  return { name: String(r[0]), fr: String(r[1]), n: { kcal: +r[2] || 0, p: +r[3] || 0, c: +r[4] || 0, f: +r[5] || 0, fib: +r[6] || 0 } };
+  return { name: String(r[0]), fr: String(r[1]), ar: String(r[7] || ''), n: { kcal: +r[2] || 0, p: +r[3] || 0, c: +r[4] || 0, f: +r[5] || 0, fib: +r[6] || 0 } };
 }
+
+/** Use an already-parsed food list (tests, and the copy cached on the phone). */
+export function useFoodDb(json) { adopt(json, Date.now()); }
 export const foodDbMeta = () => meta;
 export const findByCode = (code) => byCode.get(code) || byCode.get(code.replace(/^0+/, '')) || null;
 export const onFoodDb = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
@@ -192,7 +201,7 @@ export function foodThumb(food, { size = 'sm', photos = true, userPhoto = '' } =
     box.classList.add('has-photo');
     return box;
   }
-  box.textContent = food.emoji || (food.source === 'Open Food Facts' ? '🛒' : '🍽️');
+  box.append(icon(food.source === 'Open Food Facts' ? 'barcode' : 'plate'));
   if (food.img && photos && !HOSTED) {
     observe(box, async () => {
       try {
@@ -200,8 +209,7 @@ export function foodThumb(food, { size = 'sm', photos = true, userPhoto = '' } =
         img.alt = '';
         img.decoding = 'async';
         img.src = await photoUrl(food.img);
-        box.textContent = '';
-        box.append(img);
+        box.replaceChildren(img);
         box.classList.add('has-photo');
       } catch { /* keep the icon */ }
     });

@@ -103,8 +103,8 @@ export async function verify(pass) {
 
 export async function save(state) {
   // Your food photos and learned scans are stored as separate records, so a save doesn't re-encrypt them all.
-  if (state?.food && (Object.keys(state.food.myPhotos || {}).length || Object.keys(state.food.scans || {}).length)) {
-    state = { ...state, food: { ...state.food, myPhotos: {}, scans: {} } };
+  if (state?.food && (Object.keys(state.food.myPhotos || {}).length || Object.keys(state.food.scans || {}).length || Object.keys(state.food.recipePhotos || {}).length)) {
+    state = { ...state, food: { ...state.food, myPhotos: {}, scans: {}, recipePhotos: {} } };
   }
   if (key) {
     const { iv, ct } = await encryptObj(key, state);
@@ -132,7 +132,7 @@ export async function removePasscode(state) {
 
 // ---------- side records: your food photos and learned food scans ----------
 // One record each (so a normal save stays small), encrypted exactly like the main record.
-const SIDE = ['photo:', 'scan:'];
+const SIDE = ['photo:', 'scan:', 'rphoto:'];
 
 async function putSide(k, value) {
   if (key) {
@@ -167,7 +167,7 @@ export async function savePhotos(map) {
 export async function loadPhotos() {
   const out = {};
   for (const [k, v] of await readSide(['photo:'])) {
-    if (typeof v === 'string' && v.startsWith('data:image/jpeg;base64,')) out[k.slice(6)] = v;
+    if (typeof v === 'string' && /^data:image\/(jpeg|webp);base64,/.test(v)) out[k.slice(6)] = v;
   }
   return out;
 }
@@ -179,6 +179,15 @@ export const deleteScan = (id) => tx('readwrite', (s) => s.delete(`scan:${id}`))
 export async function loadScans() {
   const out = {};
   for (const [k, v] of await readSide(['scan:'])) if (v && typeof v === 'object') out[k.slice(5)] = v;
+  return out;
+}
+
+// Your recipe photos: {orig, edited, thumb, edit settings, mask} per recipe, encrypted like the rest.
+export const saveRecipePhoto = (id, rec) => putSide(`rphoto:${id}`, rec);
+export const deleteRecipePhoto = (id) => tx('readwrite', (s) => s.delete(`rphoto:${id}`));
+export async function loadRecipePhotos() {
+  const out = {};
+  for (const [k, v] of await readSide(['rphoto:'])) if (v && typeof v === 'object' && typeof v.edited === 'string') out[k.slice(7)] = v;
   return out;
 }
 
@@ -201,7 +210,7 @@ export async function exportBackup(state) {
 }
 
 export async function readBackup(obj, pass) {
-  if (!obj || obj.app !== 'pocket-stats') throw new Error('This is not a Pocket Stats backup.');
+  if (!obj || obj.app !== 'pocket-stats') throw new Error('not-a-backup');
   if (!obj.encrypted) return obj.data;
   const k = await deriveKey(pass, fromB64(obj.salt), obj.iter);
   return decryptObj(k, fromB64(obj.iv), fromB64(obj.ct));

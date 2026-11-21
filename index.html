@@ -5,15 +5,14 @@
   <!-- Strict privacy: code loads only from this app. The page can contact only: the app's own GitHub repo
        (public Moroccan food list and photos), plus, only after you turn them on, the two food databases and
        Claude (photo recognition). -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; manifest-src 'self'; worker-src 'self'; connect-src https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; font-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; manifest-src 'self'; worker-src 'self'; connect-src 'self' blob: https://world.openfoodfacts.org https://api.nal.usda.gov https://raw.githubusercontent.com https://api.github.com https://api.anthropic.com; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#0E1412">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Pocket Stats">
   <title>Pocket Stats</title>
   <link rel="manifest" href="manifest.webmanifest">
